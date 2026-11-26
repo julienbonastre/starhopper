@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#000">
+<title>Starhopper</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Ccircle cx='8' cy='8' r='2.4' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+:root { color-scheme: dark; --fg: #dfe6f2; --dim: #8894a8; --line: #ffffff24; --acc: #9fc4ff; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #000; color: var(--fg); font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; overscroll-behavior: none; -webkit-user-select: none; user-select: none; touch-action: none; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#hud { position: fixed; left: max(14px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); font-variant-numeric: tabular-nums; letter-spacing: .02em; text-shadow: 0 0 6px #000, 0 0 2px #000; pointer-events: none; transition: opacity .4s; }
+#hud b { display: inline-block; min-width: 5.2em; font-weight: 500; color: var(--dim); text-transform: uppercase; font-size: 10px; letter-spacing: .12em; }
+#hud div { white-space: nowrap; }
+#scale { position: fixed; right: max(14px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); text-align: right; text-transform: uppercase; letter-spacing: .18em; font-size: 10px; color: var(--dim); text-shadow: 0 0 6px #000; pointer-events: none; transition: opacity .4s; }
+#perf { position: fixed; right: 12px; top: 10px; white-space: pre; text-align: right; font: 11px/1.4 ui-monospace, Menlo, monospace; color: #9fb; text-shadow: 0 0 4px #000; pointer-events: none; }
+body.nohud #hud, body.nohud #scale { opacity: 0; }
+#veil { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, #0006 0%, #000c 100%); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); transition: opacity .5s; z-index: 5; }
+body.fly #veil { opacity: 0; pointer-events: none; }
+#card { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 24px); overflow: auto; padding: 26px 28px 22px; text-align: center; }
+h1 { margin: 0; font-weight: 200; font-size: clamp(34px, 7vw, 54px); letter-spacing: .32em; text-indent: .32em; text-transform: uppercase; }
+#tag { margin: 4px 0 20px; color: var(--dim); letter-spacing: .22em; text-transform: uppercase; font-size: 11px; }
+#go { appearance: none; font: inherit; font-size: 14px; letter-spacing: .3em; text-indent: .3em; text-transform: uppercase; color: #000; background: var(--fg); border: 0; border-radius: 999px; padding: 12px 34px; cursor: pointer; transition: transform .15s, background .15s; }
+#go:hover { background: #fff; transform: scale(1.04); }
+#go[disabled] { background: #fff3; color: #fff9; cursor: default; transform: none; }
+#bar { height: 2px; margin: 18px auto 8px; width: 60%; background: var(--line); overflow: hidden; border-radius: 2px; }
+#b { height: 100%; background: var(--acc); transform-origin: 0 50%; transform: scaleX(0); transition: transform .4s; }
+#s { color: var(--dim); min-height: 1.5em; font-size: 12px; }
+body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
+#keys { margin: 18px auto 0; display: grid; grid-template-columns: auto auto; gap: 3px 14px; justify-content: center; text-align: left; color: var(--dim); font-size: 12px; }
+#keys kbd { font: inherit; color: var(--fg); }
+#lv { margin-top: 16px; display: flex; gap: 6px; justify-content: center; }
+#lv button, #menu { appearance: none; font: inherit; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 5px 14px; cursor: pointer; }
+#lv button.on { color: #000; background: var(--fg); border-color: var(--fg); }
+#foot { margin-top: 16px; font-size: 11px; color: var(--dim); } #foot a { color: inherit; }
+#menu { position: fixed; top: max(10px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); padding: 8px 12px; display: none; z-index: 4; backdrop-filter: blur(4px); }
+@media (pointer: coarse) { body.fly #menu { display: block; } #keys { display: none; } }
+</style>
+</head>
+<body class="l">
+<canvas id="c"></canvas>
+<div id="hud"><div><b>Speed</b><span id="hs"></span></div><div><b>From Sol</b><span id="hd"></span></div><div><b>Nearest</b><span id="hn"></span></div></div>
+<div id="scale"></div>
+<div id="perf" hidden></div>
+<button id="menu" aria-label="Menu">&#8801;</button>
+<div id="veil"><div id="card">
+<h1>Starhopper</h1>
+<div id="tag">The universe, as code</div>
+<button id="go" disabled>Launch</button>
+<div id="bar"><div id="b"></div></div>
+<div id="s">Starting up</div>
+<div id="keys">
+<kbd>W A S D</kbd><span>fly</span><kbd>Mouse</kbd><span>look</span><kbd>R / F</kbd><span>up / down</span><kbd>Q / E</kbd><span>roll</span>
+<kbd>Wheel</kbd><span>throttle</span><kbd>Shift / Ctrl</kbd><span>&times;10 / &divide;10</span><kbd>Home</kbd><span>back to Sol</span><kbd>H</kbd><span>stats</span>
+</div>
+<div id="lv"><button data-l="0">High</button><button data-l="1">Medium</button><button data-l="2">Low</button></div>
+<div id="foot">Real catalogue data. <a href="https://github.com/julienbonastre/starhopper" target="_blank" rel="noopener">Source and credits</a></div>
+</div></div>
+<script>/*SCRIPT*/</script>
+</body>
+</html>

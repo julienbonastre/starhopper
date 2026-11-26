@@ -1,0 +1,16 @@
+{
+  "name": "starhopper",
+  "private": true,
+  "description": "A real-time flight through the mapped universe, rendered with WebGPU",
+  "type": "module",
+  "scripts": {
+    "data": "node pipeline/build.mjs",
+    "build": "node web/build.mjs",
+    "build:dev": "node web/build.mjs --dev",
+    "serve": "node web/serve.mjs",
+    "test": "node --test tests/"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
