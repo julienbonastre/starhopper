@@ -6,12 +6,14 @@ import path from 'node:path';
 import { OUT, writeOut } from './lib.mjs';
 import { SOURCES } from './sources.mjs';
 import { bakeStars } from './stars.mjs';
+import { bakeGalaxies } from './galaxies.mjs';
 
 const opts = { printSha: process.argv.includes('--print-sha') };
 const t0 = Date.now();
 rmSync(OUT, { recursive: true, force: true });
 const stats = {};
 console.log('stars'); stats.stars = await bakeStars(opts);
+console.log('galaxies'); stats.galaxies = await bakeGalaxies(opts);
 writeOut('manifest.json', JSON.stringify({
   sources: Object.values(SOURCES).map(({ title, url, sha256, licence, credit, home }) => ({ title, url, sha256, licence, credit, home })),
   stats,

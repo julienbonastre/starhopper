@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
@@ -28,7 +28,12 @@ export async function fetchSource(src, { printSha = false } = {}) {
       try {
         const res = await fetch(src.url, { redirect: 'follow' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        await pipeline(Readable.fromWeb(res.body), createWriteStream(file + '.part'));
+        if (src.table) {
+          // a VizieR query: keep the data lines only, so the checksum does not depend on the request date header
+          const text = (await res.text()).split('\n').filter((l) => l && l[0] !== '#').join('\n') + '\n';
+          if (text.length < 200) throw new Error('empty table');
+          writeFileSync(file + '.part', text);
+        } else await pipeline(Readable.fromWeb(res.body), createWriteStream(file + '.part'));
         renameSync(file + '.part', file);
         err = null;
         break;
@@ -88,3 +93,11 @@ export const eq2xyz = (raDeg, decDeg, d) => {
   const a = raDeg * DEG, b = decDeg * DEG, c = Math.cos(b);
   return [d * c * Math.cos(a), d * c * Math.sin(a), d * Math.sin(b)];
 };
+
+// Read a tab-separated VizieR table saved by fetchSource: row(fields[]) for each data line (header lines skipped).
+export function readTsv(file, row) {
+  const lines = readFileSync(file, 'utf8').split('\n');
+  let seen = 0;
+  for (const l of lines) { if (!l) continue; if (seen < 3) { seen++; continue; } row(l.split('\t')); }
+}
+export const sexa = (s) => { const m = s.trim().split(/[: ]+/).map(Number), neg = s.trim()[0] === '-'; return (neg ? -1 : 1) * (Math.abs(m[0]) + (m[1] || 0) / 60 + (m[2] || 0) / 3600); };

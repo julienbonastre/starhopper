@@ -1,9 +1,17 @@
-// Star tiles: streaming, level-of-detail selection, the nearest-star tracker and the point-sprite pass.
+// Point layers (stars, far galaxies): tile streaming, level-of-detail selection, the nearest-point tracker and the
+// HDR point-sprite pass. A layer is an octree of tiles on its own integer grid (see pipeline/octree.mjs).
 import { GLOBALS, HDR } from './gpu.js';
 import { cam } from './camera.js';
 
 const SHADER = /*wgsl*/`
 ${GLOBALS}
+struct Layer {
+  camQ: vec3i, pad0: i32,        // camera on this layer's grid: integer part
+  camF: vec3f, step: f32,        // ... fractional part, and parsecs per grid unit
+  far: vec3f, magOff: f32,       // offset used instead of camQ when the camera is outside the grid cube; absmag bias
+  sigma0: f32, gain: f32,        // tightest sprite in CSS pixels; brightness multiplier (fades the layer)
+}
+@group(1) @binding(0) var<uniform> L: Layer;
 struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f, @location(1) col: vec3f, @location(2) prm: vec2f }
 
 // B-V colour index -> linear RGB of a black body at that temperature, luminance 1
@@ -19,17 +27,16 @@ fn starColour(bv: f32) -> vec3f {
   return mix(vec3f(1.0), c / l, 1.25); // a little extra saturation: star colours are subtle
 }
 
-const SIGMA0 = 0.62;  // CSS pixels: the tightest a star is drawn
 const PEAK = 2.6;     // brighter stars grow instead of exceeding this centre value
 @vertex fn vs(@builtin(vertex_index) vi: u32, @location(0) s: vec4u) -> VO {
   var o: VO;
   let corner = vec2f(f32(vi & 1u) * 2.0 - 1.0, f32(vi >> 1u) * 2.0 - 1.0);
-  let rel = (vec3f(vec3i(s.xyz) - G.camQ) - G.camF) * G.step + G.far;
+  let rel = (vec3f(vec3i(s.xyz) - L.camQ) - L.camF) * L.step + L.far;
   let d2 = max(dot(rel, rel), 1e-24);
-  let absmag = f32(s.w >> 16u) * 0.001 - 20.0;
+  let absmag = f32(s.w >> 16u) * 0.001 - L.magOff;
   // energy in CSS-pixel units: exposure * 10^(-0.4 m), m = absmag + 5 log10(d / 10 pc)
-  let e = G.exposure * exp(-0.9210340 * absmag) * 100.0 / d2;
-  let s0 = SIGMA0 * G.pxScale;
+  let e = G.exposure * L.gain * exp(-0.9210340 * absmag) * 100.0 / d2;
+  let s0 = L.sigma0 * G.pxScale;
   let sigma = min(max(s0, sqrt(e * G.pxScale * G.pxScale / (6.2831853 * PEAK))), 26.0 * G.pxScale);
   let peak = min(e * G.pxScale * G.pxScale / (6.2831853 * sigma * sigma), 40.0);
   let p = project(rel);
@@ -51,9 +58,10 @@ const PEAK = 2.6;     // brighter stars grow instead of exceeding this centre va
 
 const MAX_DRAW = 2048, FETCHES = 8, SCAN_PER_FRAME = 60000;
 
-export async function initStars(gpu, globalsBuf, base, quality) {
+let shared;   // pipeline and layouts, built once for all layers
+export async function initPoints(gpu, globalsBuf, dir, quality, opt) {
   const { device, queue } = gpu;
-  const idx = await (await fetch(base + 'stars/index.json')).json();
+  const idx = await (await fetch(dir + 'index.json')).json();
   const N = idx.nodes.length, HALF = idx.half, STEP = idx.step;
   const level = new Uint8Array(N), ox = new Float64Array(N), oy = new Float64Array(N), oz = new Float64Array(N), size = new Float64Array(N);
   const count = new Uint32Array(N), kids = new Int32Array(N * 8), qm = new Float32Array(N * 9);
@@ -63,15 +71,21 @@ export async function initStars(gpu, globalsBuf, base, quality) {
     ox[i] = n[1] * size[i] - HALF; oy[i] = n[2] * size[i] - HALF; oz[i] = n[3] * size[i] - HALF;
     count[i] = n[4]; kids.set(n[5], i * 8); qm.set(n[6], i * 9);
   });
-  const module = device.createShaderModule({ code: SHADER });
-  const layout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }] });
-  const pipeline = device.createRenderPipeline({
-    layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
-    vertex: { module, entryPoint: 'vs', buffers: [{ arrayStride: 16, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'uint32x4' }] }] },
-    fragment: { module, entryPoint: 'fs', targets: [{ format: HDR, blend: { color: { srcFactor: 'one', dstFactor: 'one' }, alpha: { srcFactor: 'one', dstFactor: 'one' } } }] },
-    primitive: { topology: 'triangle-strip' },
-  });
-  const bind = device.createBindGroup({ layout, entries: [{ binding: 0, resource: { buffer: globalsBuf } }] });
+  if (!shared) {
+    const module = device.createShaderModule({ code: SHADER });
+    const layout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }] });
+    const layerLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {} }] });
+    shared = { layerLayout, pipeline: device.createRenderPipeline({
+      layout: device.createPipelineLayout({ bindGroupLayouts: [layout, layerLayout] }),
+      vertex: { module, entryPoint: 'vs', buffers: [{ arrayStride: 16, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'uint32x4' }] }] },
+      fragment: { module, entryPoint: 'fs', targets: [{ format: HDR, blend: { color: { srcFactor: 'one', dstFactor: 'one' }, alpha: { srcFactor: 'one', dstFactor: 'one' } } }] },
+      primitive: { topology: 'triangle-strip' },
+    }), bind: device.createBindGroup({ layout, entries: [{ binding: 0, resource: { buffer: globalsBuf } }] }) };
+  }
+  const { pipeline, bind } = shared;
+  const layerData = new ArrayBuffer(64), lf = new Float32Array(layerData), li = new Int32Array(layerData);
+  const layerBuf = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const layerBind = device.createBindGroup({ layout: shared.layerLayout, entries: [{ binding: 0, resource: { buffer: layerBuf } }] });
 
   const stack = new Int32Array(256), drawId = new Int32Array(MAX_DRAW), drawCount = new Uint32Array(MAX_DRAW), drawDist = new Float64Array(MAX_DRAW);
   const wantId = new Int32Array(FETCHES);
@@ -82,7 +96,7 @@ export async function initStars(gpu, globalsBuf, base, quality) {
 
   const load = (i) => {
     state[i] = 1; loading++;
-    fetch(base + 'stars/' + i + '.bin').then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }).then((ab) => {
+    fetch(dir + i + '.bin').then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }).then((ab) => {
       const b = device.createBuffer({ size: ab.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
       queue.writeBuffer(b, 0, ab);
       bufs[i] = b; cpu[i] = new Uint32Array(ab); state[i] = 2; loadedStars += count[i]; lastUse[i] = frame; loading--;
@@ -90,7 +104,7 @@ export async function initStars(gpu, globalsBuf, base, quality) {
   };
   const evict = () => {
     // drop the least recently used tiles that are not needed any more
-    while (loadedStars > quality.starBudget) {
+    while (loadedStars > opt.budget) {
       let best = -1, age = 120;
       for (let i = 0; i < N; i++) if (state[i] === 2 && frame - lastUse[i] > age) { age = frame - lastUse[i]; best = i; }
       if (best < 0) break;
@@ -124,7 +138,7 @@ export async function initStars(gpu, globalsBuf, base, quality) {
     }
     for (let w = 0; w < nWant && loading < FETCHES; w++) load(wantId[w]);
     if ((frame & 63) === 0) evict();
-    trackNearest();
+    if (opt.track) trackNearest();
   }
 
   function trackNearest() {
@@ -151,23 +165,23 @@ export async function initStars(gpu, globalsBuf, base, quality) {
     if (near.tile >= 0 && cpu[near.tile]) {
       const a = cpu[near.tile], k = near.k * 4;
       near.x = a[k] * STEP - HALF; near.y = a[k + 1] * STEP - HALF; near.z = a[k + 2] * STEP - HALF;
-      near.absmag = (a[k + 3] >>> 16) * 0.001 - 20; near.ci = ((a[k + 3] >>> 8) & 255) / 80 - 0.5;
+      near.absmag = (a[k + 3] >>> 16) * 0.001 - opt.magOff; near.ci = ((a[k + 3] >>> 8) & 255) / 80 - 0.5;
     }
   }
 
-  function draw(pass) {
-    pass.setPipeline(pipeline); pass.setBindGroup(0, bind);
-    for (let k = 0; k < nDraw; k++) { pass.setVertexBuffer(0, bufs[drawId[k]]); pass.draw(4, drawCount[k]); }
-  }
-  // writes the camera's grid coordinates into the globals views (ints at i32[16..18], fractions at f32[20..22])
-  function writeCamera(f32, i32) {
+  function draw(pass, gain) {
+    // this layer's camera: exact integer + fraction on its grid, or a plain offset once outside the cube
     let inside = true;
     for (let a = 0; a < 3; a++) if (Math.abs(cam.p[a]) >= HALF) inside = false;
     for (let a = 0; a < 3; a++) {
-      if (inside) { const g = (cam.p[a] + HALF) / STEP, q = Math.floor(g); i32[16 + a] = q; f32[20 + a] = g - q; f32[24 + a] = 0; }
-      else { i32[16 + a] = 0; f32[20 + a] = 0; f32[24 + a] = -HALF - cam.p[a]; }
+      if (inside) { const g = (cam.p[a] + HALF) / STEP, q = Math.floor(g); li[a] = q; lf[4 + a] = g - q; lf[8 + a] = 0; }
+      else { li[a] = 0; lf[4 + a] = 0; lf[8 + a] = -HALF - cam.p[a]; }
     }
-    f32[23] = STEP;
+    lf[7] = STEP; lf[11] = opt.magOff; lf[12] = opt.sigma0; lf[13] = gain;
+    queue.writeBuffer(layerBuf, 0, layerData);
+    if (gain <= 0.001) return;
+    pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.setBindGroup(1, layerBind);
+    for (let k = 0; k < nDraw; k++) { pass.setVertexBuffer(0, bufs[drawId[k]]); pass.draw(4, drawCount[k]); }
   }
-  return { update, draw, writeCamera, near, stats: () => ({ tiles: nDraw, drawn: drawnStars, loaded: loadedStars, pending, loading }) };
+  return { update, draw, near, half: HALF, stats: () => ({ tiles: nDraw, drawn: drawnStars, loaded: loadedStars, pending, loading }) };
 }
