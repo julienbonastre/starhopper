@@ -16,9 +16,10 @@ CONSTRAINTS
 - Code MIT. Baked data carries the licence of its sources (HYG and OpenNGC are CC BY-SA).
 
 TARGET
-- macOS, current Chrome, MacBook Pro M5 Pro, 48 GB, built-in 120 Hz display at native resolution
+- Primary: desktop. Fluid, smooth flight here comes before everything below.
+- macOS 26, Chrome 158, MacBook Pro M5 Pro (20 GPU cores, 48 GB), built-in 3024x1964 display at 120 Hz, full resolution
 - GPU frame time <= 6 ms average, no frame > 8.3 ms during a scripted 90 s fly-through
-- Mobile is a first-class target, not a fallback: Samsung Galaxy S23 Ultra, current Chrome for Android, landscape. Steady 60 fps on the Medium level; High must stay usable.
+- Secondary: capable phones. Samsung Galaxy S23 Ultra, current Chrome for Android, landscape. Aim for 60 fps on Medium, with High still usable. Never trade desktop quality or smoothness for it; phones get there through the detail levels.
 - Three detail levels (Low / Medium / High), the same universe with less in it: star count per tile, tile radius, bloom quality, anti-aliasing, starting resolution. The level is picked on first visit from device class and memory, remembered, and changeable in the menu.
 - On top of the level, adapt at runtime to hold the frame target: resolution first, then star count and tile radius, in small steps with no visible popping. Tuning runs behind the start menu so it has settled before the flight begins.
 - If loading crashes the tab or the GPU device is lost, restart one level lower. Clear message when WebGPU is missing.
