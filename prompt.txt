@@ -1,0 +1,60 @@
+Build Starhopper: a real-time, browser-based flight through the real universe as we have mapped it. It needs to look beautiful, be honest about what is measured versus filled in, and let me fly a free camera from the Solar System out to the cosmic web.
+
+PRIORITIES (in this order when they conflict)
+1. Fidelity to real catalogue data (positions, brightness, colour)
+2. Visual quality
+3. Stable frame pacing at the target spec
+4. Small initial download
+
+CONSTRAINTS
+- No Three.js/Babylon.js or other engines. WebGPU rendered.
+- No hand-edited data and no image/model files. Every object comes from either a public catalogue or a documented procedural model.
+- Data pipeline as code: a build script fetches each catalogue at a pinned version, verifies a checksum, and bakes compact binary tiles. Deterministic output; sources, versions and licences recorded in a generated manifest and shown in an in-app credits panel.
+- Deliverable is a static site (index.html + binary tiles) built and deployed to GitHub Pages by a GitHub Actions workflow. No manual steps. The first frame must not wait on anything beyond the nearest-stars tile.
+- Tiles stream in around the camera as it moves and are evicted behind it; no hitching when a tile arrives.
+- Zero per-frame JS allocations (no GC stutter). Preallocate all buffers.
+- Code MIT. Baked data carries the licence of its sources (HYG and OpenNGC are CC BY-SA).
+
+TARGET
+- macOS, current Chrome, MacBook Pro M5 Pro, 48 GB, built-in 120 Hz display at native resolution
+- GPU frame time <= 6 ms average, no frame > 8.3 ms during a scripted 90 s fly-through
+- Falls back gracefully (resolution first, then star count) on slower hardware; clear message when WebGPU is missing.
+
+DATA (real)
+- Stars: AT-HYG (Hipparcos + Tycho-2 + Gaia distances), 3D position, magnitude, colour index, proper names
+- Constellations: IAU names with stick-figure lines; lines fade and visibly distort as you leave the Sun
+- Solar System: Sun and planets from JPL orbital elements, at the current date
+- Exoplanet hosts: NASA Exoplanet Archive, markable as a layer
+- Nebulae and clusters: OpenNGC (Messier/NGC), rendered procedurally at their catalogued position, size and type
+- Galaxies: 2MASS Redshift Survey in 3D, plus Local Group members by name
+
+DATA (procedural fill, always distinguishable)
+- Milky Way beyond the reach of the star catalogue: a density model with bar, spiral arms, disc, bulge, halo and dust lanes, seeded and deterministic
+- Individual galaxies up close: procedural spiral/elliptical/irregular forms chosen from the catalogued morphology
+- Galaxies beyond the survey limit: statistical fill continuing the observed large-scale structure
+- A "measured only" toggle hides all procedural fill so the edge of human knowledge is visible.
+
+SCALE AND FLIGHT
+- Continuous travel across about 14 orders of magnitude (AU to hundreds of megaparsecs) with no loading screens, mode switches or precision jitter: camera-relative rendering with a floating origin.
+- Speed is exponential and context-aware: it eases down near objects and opens up in voids. Always superluminal by necessity; show current speed in c and in ly/s, and distance from Sol.
+- Stars are physically based: apparent brightness from absolute magnitude and distance, colour from temperature, HDR with bloom and a tunable exposure. No streak/warp gimmicks unless they come from real motion blur.
+
+CONTROLS
+- WASD move, mouse look (pointer lock), Q/E roll, R/F up/down
+- Mouse wheel or Shift/Ctrl: speed up/down through the exponential range
+- Click or search an object by name to target it; G to fly there with eased acceleration
+- Number keys jump to fixed viewpoints; Home returns to Sol
+- L constellation lines, N names, P procedural fill, M sound, H performance stats, Esc menu
+
+HUD
+Minimal and hideable: speed, distance from Sol, nearest named object, current scale (Solar System / stellar neighbourhood / Milky Way / Local Group / cosmic web).
+
+SOUND
+Synthesised ambient soundscape with the Web Audio API, responsive to speed and scale. Off until the user starts.
+
+VERIFICATION
+- Data: automated tests that known objects land where they should (Sirius, Betelgeuse, Alpha Centauri, Polaris, Sgr A*, M31, Virgo cluster: position, distance and magnitude within catalogue tolerance), and that the sky rendered from Earth matches the real constellations.
+- Visual critic: a separate subagent that sees ONLY the renders, never the code or reasoning. Give it 8 fixed camera poses (Earth night sky, leaving the Solar System, among the Pleiades, inside the Orion nebula, above the galactic disc, approaching M31, Local Group, cosmic web) rendered in GPU-accelerated Chrome, plus a recording of the fly-through to catch shimmer, aliasing, popping, banding and tile seams. It returns prioritised, concrete defects. Iterate until it reports nothing above "minor".
+- Performance: GPU timestamp queries plus a frame-time log from the scripted fly-through on the target machine. Report average, 99th percentile and max, and peak GPU/JS memory.
+
+DONE WHEN: all three verification gates pass and the Pages deployment is live. Deliver the site, initial download size, total tile size, the perf report and the critic's final review.
