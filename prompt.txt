@@ -18,7 +18,11 @@ CONSTRAINTS
 TARGET
 - macOS, current Chrome, MacBook Pro M5 Pro, 48 GB, built-in 120 Hz display at native resolution
 - GPU frame time <= 6 ms average, no frame > 8.3 ms during a scripted 90 s fly-through
-- Falls back gracefully (resolution first, then star count) on slower hardware; clear message when WebGPU is missing.
+- Mobile is a first-class target, not a fallback: Samsung Galaxy S23 Ultra, current Chrome for Android, landscape. Steady 60 fps on the Medium level; High must stay usable.
+- Three detail levels (Low / Medium / High), the same universe with less in it: star count per tile, tile radius, bloom quality, anti-aliasing, starting resolution. The level is picked on first visit from device class and memory, remembered, and changeable in the menu.
+- On top of the level, adapt at runtime to hold the frame target: resolution first, then star count and tile radius, in small steps with no visible popping. Tuning runs behind the start menu so it has settled before the flight begins.
+- If loading crashes the tab or the GPU device is lost, restart one level lower. Clear message when WebGPU is missing.
+- Mobile budgets: tile downloads and GPU memory sized for a phone (cap resident tiles, smaller tiles on Low/Medium, respect Save-Data), and no work while the tab is hidden.
 
 DATA (real)
 - Stars: AT-HYG (Hipparcos + Tycho-2 + Gaia distances), 3D position, magnitude, colour index, proper names
@@ -45,6 +49,7 @@ CONTROLS
 - Click or search an object by name to target it; G to fly there with eased acceleration
 - Number keys jump to fixed viewpoints; Home returns to Sol
 - L constellation lines, N names, P procedural fill, M sound, H performance stats, Esc menu
+- Touch: hold one finger to fly forward and slide it to steer; two-finger pinch or vertical drag changes speed through the exponential range; tap an object to target it, double-tap to fly there. A menu button gives the layer toggles, search, viewpoints and detail level. Phones always present in landscape; UI sized for thumbs and safe-area insets.
 
 HUD
 Minimal and hideable: speed, distance from Sol, nearest named object, current scale (Solar System / stellar neighbourhood / Milky Way / Local Group / cosmic web).
@@ -55,6 +60,6 @@ Synthesised ambient soundscape with the Web Audio API, responsive to speed and s
 VERIFICATION
 - Data: automated tests that known objects land where they should (Sirius, Betelgeuse, Alpha Centauri, Polaris, Sgr A*, M31, Virgo cluster: position, distance and magnitude within catalogue tolerance), and that the sky rendered from Earth matches the real constellations.
 - Visual critic: a separate subagent that sees ONLY the renders, never the code or reasoning. Give it 8 fixed camera poses (Earth night sky, leaving the Solar System, among the Pleiades, inside the Orion nebula, above the galactic disc, approaching M31, Local Group, cosmic web) rendered in GPU-accelerated Chrome, plus a recording of the fly-through to catch shimmer, aliasing, popping, banding and tile seams. It returns prioritised, concrete defects. Iterate until it reports nothing above "minor".
-- Performance: GPU timestamp queries plus a frame-time log from the scripted fly-through on the target machine. Report average, 99th percentile and max, and peak GPU/JS memory.
+- Performance: GPU timestamp queries plus a frame-time log from the scripted fly-through on the target machine. Report average, 99th percentile and max, and peak GPU/JS memory. Repeat the run on the phone target at Medium and High, and have the critic review two of the poses at phone resolution with the touch UI visible.
 
 DONE WHEN: all three verification gates pass and the Pages deployment is live. Deliver the site, initial download size, total tile size, the perf report and the critic's final review.
