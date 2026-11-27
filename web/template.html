@@ -37,6 +37,8 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 #keys kbd { font: inherit; color: var(--fg); }
 #find { width: 100%; margin-top: 18px; font: inherit; color: var(--fg); background: #ffffff10; border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; outline: none; -webkit-user-select: text; user-select: text; }
 #find:focus { border-color: var(--acc); }
+#vol { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+#vol input { width: 110px; accent-color: #dfe6f5; }
 #tg { margin-top: 12px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
 #cr { margin-top: 14px; font-size: 11px; color: var(--dim); text-align: left; } #cr summary { cursor: pointer; text-align: center; } #crb p { margin: 8px 0 0; } #crb a { color: inherit; }
 #lv, #vp, #sv { margin-top: 12px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
@@ -86,7 +88,7 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 </div></details>
 <div id="tk">Drag the sky to look around &middot; Right edge: push up to fly forward, pull down to back away<br>Two fingers: spread or pinch to fly, twist to roll<br>Tap: target &middot; Double tap: fly there &middot; Hold: go-to menu</div>
 <input id="find" type="search" placeholder="Fly to a star, planet, nebula or galaxy: Vega, Saturn, M 42, Andromeda ..." autocomplete="off" spellcheck="false">
-<div id="tg"><button data-k="lines">Constellations</button><button data-k="names">Names</button><button data-k="proc" class="on">Procedural fill</button><button data-k="exo">Exoplanet hosts</button><button data-k="sound">Sound</button></div>
+<div id="tg"><button data-k="lines">Constellations</button><button data-k="names">Names</button><button data-k="proc" class="on">Procedural fill</button><button data-k="exo">Exoplanet hosts</button><button data-k="sound" class="on">Sound</button><label id="vol">Volume<input id="volr" type="range" min="0" max="100" value="70"></label></div>
 <div id="vp"></div>
 <div id="sv"><input id="svn" type="text" maxlength="40" placeholder="Name this place to save it" autocomplete="off" spellcheck="false"><button id="svb">Save</button></div>
 <div id="svl"></div>

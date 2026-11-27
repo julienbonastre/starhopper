@@ -14,7 +14,7 @@ import { initDeep } from './deep.js';
 import { initMarkers } from './markers.js';
 import { initBeyond } from './beyond.js';
 import { initWeb } from './web.js';
-import { setSound, updateSound } from './audio.js';
+import { setSound, setVolume, updateSound, level } from './audio.js';
 import { PLANETS, orbitPoints, jdNow } from './solar.js';
 
 const body = document.body, canvas = $('c');
@@ -100,7 +100,7 @@ async function main() {
   labels.occluder(bodies.hides);
   place(0, bodies.night());
   // the picture comes first: figures and names are off until asked for
-  const show = { lines: false, names: false, proc: true, sound: false, exo: false };
+  const show = { lines: false, names: false, proc: true, sound: true, exo: false };
   const labelLimit = { star: 0, con: 0, body: 0, deep: 0, galaxy: 0, target: 99 };
   const kindGain = { star: 1, con: 1, body: 1, deep: 1, galaxy: 1, target: 1 };
   const tgtLabel = labels.add('', 'target', 0, 0, 0, NaN, 0, 0, -100);   // the target marker: hidden (maxDist 0) until something is picked
@@ -139,15 +139,20 @@ async function main() {
     else if (code === 'KeyL') { show.lines = !show.lines; syncToggles(); }
     else if (code === 'KeyN') { show.names = !show.names; syncToggles(); }
     else if (code === 'KeyX') { show.exo = !show.exo; syncToggles(); flash(show.exo ? markers.count.toLocaleString() + ' stars with known planets' : 'Exoplanet hosts hidden'); }
-    else if (code === 'KeyM') { show.sound = setSound(!show.sound); syncToggles(); flash(show.sound ? 'Sound on' : 'Sound off'); }
+    else if (code === 'KeyM') { show.sound = setSound(!show.sound); syncToggles(); keep('starhopperSound', show.sound ? 1 : 0); flash(show.sound ? 'Sound on' : 'Sound off'); }
     else if (code === 'KeyP') { show.proc = !show.proc; syncToggles(); flash(show.proc ? 'Procedural fill on' : 'Measured data only'); }
     else if (/^Digit[1-8]$/.test(code)) { setPose(+code[5] - 1); state.snap = 1; flash(POSES[+code[5] - 1].name); }
     else if (code === 'Unlocked' && !params.has('auto')) body.classList.remove('fly');
     else if (code === 'KeyB' && params.has('bench')) { flash('Benchmark running'); runBench().then((r) => { showPerf = true; $('perf').hidden = false; console.log(JSON.stringify(r)); flash('Benchmark done'); $('s').textContent = JSON.stringify(r); body.classList.remove('fly'); }); }
   });
   const flash = (t) => { const m = $('msg'); m.textContent = t; m.classList.add('on'); clearTimeout(flash.t); flash.t = setTimeout(() => m.classList.remove('on'), 2200); };
-  document.querySelectorAll('#tg button').forEach((b) => { b.onclick = () => { const k = b.dataset.k; show[k] = k === 'sound' ? setSound(!show[k]) : !show[k]; b.classList.toggle('on', show[k]); }; });
+  document.querySelectorAll('#tg button').forEach((b) => { b.onclick = () => { const k = b.dataset.k; show[k] = k === 'sound' ? setSound(!show[k]) : !show[k]; b.classList.toggle('on', show[k]); if (k === 'sound') keep('starhopperSound', show[k] ? 1 : 0); }; });
   const syncToggles = () => document.querySelectorAll('#tg button').forEach((b) => b.classList.toggle('on', show[b.dataset.k]));
+  // sound is on unless it was turned off on an earlier visit; the volume is remembered too. (The sound itself can only
+  // start from a tap or a key, so it begins at Launch.)
+  try { if (localStorage.starhopperSound === '0') show.sound = false; if (localStorage.starhopperVol) $('volr').value = localStorage.starhopperVol; } catch {}
+  syncToggles(); setVolume($('volr').value / 100);
+  $('volr').oninput = (e) => { setVolume(e.target.value / 100); keep('starhopperVol', e.target.value); };
   // search: every named star and galaxy; Enter flies to the best match, stopping a comfortable distance short
   // rows: search key, shown name, position, where a fly-to stops, absolute magnitude, kind (0 star, 1 galaxy, 2 planet, 3 nebula or cluster), radius
   const index = [];
@@ -186,6 +191,7 @@ async function main() {
   }).catch(() => {});
   const launch = () => {
     body.classList.add('fly');
+    if (show.sound) { show.sound = setSound(true); syncToggles(); }
     // phones fly in landscape: full screen first, since the orientation can only be locked there
     if (MOBILE) document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
     else canvas.requestPointerLock?.()?.catch?.(() => {});
@@ -449,6 +455,6 @@ async function main() {
     const budget = period * 1000;
     return { frameMs: stat(b.frame), gpuMs: stat(b.gpu), late: b.frame.filter((x) => x > budget * 1.6).length, gpuOver: b.gpu.filter((x) => x > 8.3).length, legs, size: [W, H], scale: resScale, level: LEVEL, mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null };
   };
-  window.SH = { flyPose, deep, bodies, pick, target, labels, bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
+  window.SH = { audioLevel: level, flyPose, deep, bodies, pick, target, labels, bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
 }
 main().catch((e) => { console.error(e); body.className = 'l e'; $('s').textContent = (e.cause ? '' : 'Failed to start: ') + e.message; });
