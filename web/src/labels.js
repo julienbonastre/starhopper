@@ -26,7 +26,7 @@ struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f, @location(1) 
 export const KIND = {
   star: { font: '500 12px', colour: [0.80, 0.86, 1.0], dx: 9, dy: -9, upper: false, spacing: '0.02em' },
   con: { font: '500 10.5px', colour: [0.45, 0.60, 0.95], dx: 0, dy: -8, upper: true, spacing: '0.22em', centre: true },
-  body: { font: '500 12px', colour: [1.0, 0.92, 0.78], dx: 9, dy: -9, upper: false, spacing: '0.02em' },
+  body: { font: '500 12px', colour: [1.0, 0.92, 0.78], dx: 0, dy: 15, upper: false, spacing: '0.02em', centre: true },
   deep: { font: '500 11.5px', colour: [0.86, 0.80, 1.0], dx: 10, dy: -9, upper: false, spacing: '0.03em' },
   galaxy: { font: '500 11.5px', colour: [0.98, 0.84, 0.88], dx: 0, dy: 16, upper: false, spacing: '0.03em', centre: true },
 };
@@ -54,7 +54,7 @@ export function initLabels(gpu, globalsBuf, getScale) {
   const items = [];                                  // every label that could ever show
   const slotItem = new Int32Array(SLOTS).fill(-1), slotAlpha = new Float32Array(SLOTS), slotWant = new Uint8Array(SLOTS), slotW = new Float32Array(SLOTS);
   const cand = new Int32Array(4096), candScore = new Float32Array(4096), grid = new Uint8Array(64 * 64);
-  let live = 0, cursor = 0, nCand = 0;
+  let live = 0, cursor = 0, nCand = 0, hidden = null;       // hidden(dx, dy, dz): is that point behind something solid?
   const copySrc = { source: cv, origin: [0, 0] }, copyDst = { texture: tex, origin: [0, 0] }, copySize = [SW * scale, SH * scale];
 
   // text, kind, world position (pc). radius (pc) moves a centred label out below an extended object. Priority is the apparent magnitude from absmag, or the fixed rank if absmag is NaN.
@@ -89,6 +89,7 @@ export function initLabels(gpu, globalsBuf, getScale) {
       if (vz <= 0) continue;
       const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
       if (d > it.maxDist || d < it.minDist) continue;
+      if (hidden && hidden(dx, dy, dz)) continue;
       const m = it.absmag === it.absmag ? it.absmag + 5 * Math.log10(Math.max(d, 1e-9) / 10) : it.rank;
       if (m > magLimit[it.kind]) continue;
       const nx = (dx * cam.right[0] + dy * cam.right[1] + dz * cam.right[2]) * f / asp / vz, ny = (dx * cam.up[0] + dy * cam.up[1] + dz * cam.up[2]) * f / vz;
@@ -143,5 +144,5 @@ export function initLabels(gpu, globalsBuf, getScale) {
     if (live) queue.writeBuffer(buf, 0, out, 0, live * 12);
   }
   function draw(pass) { if (!live) return; pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.setVertexBuffer(0, buf); pass.draw(4, live); }
-  return { add, choose, update, draw, items };
+  return { add, choose, update, draw, items, occluder: (f) => { hidden = f; } };
 }

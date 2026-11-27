@@ -12,7 +12,7 @@ struct Layer {
   sigma0: f32, gain: f32,        // tightest sprite in CSS pixels; brightness multiplier (fades the layer)
 }
 @group(1) @binding(0) var<uniform> L: Layer;
-struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f, @location(1) col: vec3f, @location(2) prm: vec2f }
+struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f, @location(1) col: vec3f, @location(2) prm: vec4f }
 
 // B-V colour index -> linear RGB of a black body at that temperature, luminance 1
 fn starColour(bv: f32) -> vec3f {
@@ -28,6 +28,7 @@ fn starColour(bv: f32) -> vec3f {
 }
 
 const PEAK = 2.6;     // brighter stars grow instead of exceeding this centre value
+const CORE = 5.5;     // ... up to this sigma in CSS pixels
 @vertex fn vs(@builtin(vertex_index) vi: u32, @location(0) s: vec4u) -> VO {
   var o: VO;
   let corner = vec2f(f32(vi & 1u) * 2.0 - 1.0, f32(vi >> 1u) * 2.0 - 1.0);
@@ -37,23 +38,32 @@ const PEAK = 2.6;     // brighter stars grow instead of exceeding this centre va
   // energy in CSS-pixel units: exposure * 10^(-0.4 m), m = absmag + 5 log10(d / 10 pc)
   let e = G.exposure * L.gain * exp(-0.9210340 * absmag) * 100.0 / d2;
   let s0 = L.sigma0 * G.pxScale;
-  let sigma = min(max(s0, sqrt(e * G.pxScale * G.pxScale / (6.2831853 * PEAK))), 26.0 * G.pxScale);
-  let peak = min(e * G.pxScale * G.pxScale / (6.2831853 * sigma * sigma), 40.0);
+  // A star's disc grows with its brightness only so far (CORE pixels): beyond that it would read as a ball. The
+  // rest shows as glare, a wide soft halo whose reach grows with the logarithm of the excess.
+  let ep = e * G.pxScale * G.pxScale;
+  let sigma = min(max(s0, sqrt(ep / (6.2831853 * PEAK))), CORE * G.pxScale);
+  let peak = min(ep / (6.2831853 * sigma * sigma), 40.0);
+  let over = log2(1.0 + ep / (6.2831853 * PEAK * CORE * CORE * G.pxScale * G.pxScale));   // 1 where the disc stops growing
+  let glare = smoothstep(0.6, 1.6, over);
+  let reach = sigma * min(3.6 + 2.2 * over * glare, 30.0);
   let p = project(rel);
   if (peak < 0.0035 || p.z > 1.0) { o.pos = vec4f(0.0, 0.0, 2.0, 1.0); return o; }
-  let half = sigma * 3.6 + 1.0;
+  let half = reach + 1.0;
   o.pos = vec4f(p.xy + corner * half * 2.0 / G.viewport, 0.5, 1.0);
   o.uv = corner * half;
   o.col = starColour(f32((s.w >> 8u) & 255u) / 80.0 - 0.5);
-  o.prm = vec2f(peak, sigma);
+  o.prm = vec4f(peak, sigma, reach / sigma, min(0.05 * over, 0.6) * glare);
   return o;
 }
 @fragment fn fs(i: VO) -> @location(0) vec4f {
   let r2 = dot(i.uv, i.uv) / (i.prm.y * i.prm.y);
   let core = exp(-0.5 * r2);
+  // glare: falls off as a power law and reaches zero at the edge of the sprite
+  let q = clamp(1.0 - r2 / (i.prm.z * i.prm.z), 0.0, 1.0);
+  let halo = i.prm.w / (1.0 + r2 * 0.35) * q * q;
   // faint wide skirt on bright stars, fading to zero at the quad edge
   let skirt = 0.035 / (1.0 + r2 * r2 * 0.08) * max(0.0, 1.0 - r2 / 12.96) * smoothstep(1.2, 3.0, i.prm.y / G.pxScale);
-  return vec4f(i.col * i.prm.x * (core + skirt), 1.0);
+  return vec4f(i.col * i.prm.x * (core + skirt) + mix(i.col, vec3f(1.0), 0.5) * halo, 1.0);
 }`;
 
 const MAX_DRAW = 2048, FETCHES = 8, SCAN_PER_FRAME = 60000;

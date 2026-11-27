@@ -26,7 +26,7 @@ try {
   const logs = [];
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') logs.push(m.text().slice(0, 400)); });
   page.on('pageerror', (e) => logs.push('pageerror: ' + e.message.slice(0, 400)));
-  await page.goto(`http://localhost:${port}/?auto&bench&q=${arg('q', '0')}&${arg('query', '')}`);
+  await page.goto(`http://localhost:${port}/?auto&bench&jd=${arg('jd', '2461390')}&q=${arg('q', '0')}&${arg('query', '')}`);
   await page.waitForFunction(() => window.SH && window.SH.ready, null, { timeout: 120000 });
   await page.waitForTimeout(6000);   // let the resolution scaler settle behind the menu, as it does for a visitor
   const view = await page.evaluate(() => ({ css: [innerWidth, innerHeight], dpr: devicePixelRatio, before: SH.perf() }));

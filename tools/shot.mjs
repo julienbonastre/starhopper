@@ -27,7 +27,7 @@ try {
   const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.log('console: ' + m.text().slice(0, 600)); });
   page.on('pageerror', (e) => console.log('pageerror: ' + e.message.slice(0, 600)));
-  await page.goto(`http://localhost:${port}/?auto&offscreen&q=${arg('q', '0')}&${arg('query', '')}`);
+  await page.goto(`http://localhost:${port}/?auto&offscreen&jd=${arg('jd', '2461390')}&q=${arg('q', '0')}&${arg('query', '')}`);
   await page.waitForFunction(() => window.SH && window.SH.ready, null, { timeout: 120000 });
   const settle = async () => {
     for (let k = 0; k < 120; k++) { await page.waitForTimeout(250); if (k > 3 && !(await page.evaluate(() => SH.stars.stats().pending + SH.galPts.stats().pending))) break; }

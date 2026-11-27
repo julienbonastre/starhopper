@@ -21,6 +21,8 @@ export const POSES = [
   { name: 'The cosmic web', p: add(virgo, NGP, 5.5e7), at: virgo, up: unit(GC) },
 ];
 
+// some viewpoints depend on the date (where the Earth is): main places them once the Solar System is set up
+export const place = (i, v) => { POSES[i].p = v.p; POSES[i].at = v.at; POSES[i].up = v.up; };
 export function setPose(i) {
   const s = POSES[i]; if (!s) return;
   cam.p[0] = s.p[0]; cam.p[1] = s.p[1]; cam.p[2] = s.p[2];

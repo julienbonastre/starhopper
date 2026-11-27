@@ -27,7 +27,7 @@ try {
   const logs = [];
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') logs.push(m.text().slice(0, 400)); });
   page.on('pageerror', (e) => logs.push('pageerror: ' + e.message.slice(0, 400)));
-  await page.goto(`http://localhost:${port}/?auto&offscreen&q=${arg('q', '0')}&${arg('query', '')}`);
+  await page.goto(`http://localhost:${port}/?auto&offscreen&jd=${arg('jd', '2461390')}&q=${arg('q', '0')}&${arg('query', '')}`);
   await page.waitForFunction(() => window.SH && window.SH.ready, null, { timeout: 120000 });
   const report = { size: [w, h], adapter: await page.evaluate(async () => { const a = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }); return { vendor: a.info.vendor, architecture: a.info.architecture, fallback: a.info.isFallbackAdapter }; }), userAgent: await page.evaluate(() => navigator.userAgent), poses: [] };
   const names = await page.evaluate(() => SH.POSES.map((p) => p.name));

@@ -8,7 +8,9 @@ import { initGalaxies } from './galaxies.js';
 import { initPost } from './post.js';
 import { initLines } from './lines.js';
 import { initLabels } from './labels.js';
-import { POSES, setPose } from './poses.js';
+import { POSES, setPose, place } from './poses.js';
+import { initBodies } from './bodies.js';
+import { PLANETS, orbitPoints, jdNow } from './solar.js';
 
 const body = document.body, canvas = $('c');
 const params = new URLSearchParams(location.search);
@@ -37,6 +39,9 @@ async function main() {
     initPoints(gpu, globalsBuf, base + 'galaxies/', quality, { budget: 400_000, track: false, magOff: 40, sigma0: 1.0 }),
     initGalaxies(gpu, globalsBuf, base, quality)]);
   const post = initPost(gpu, quality);
+  // the planets are placed for today's date (?jd= pins it, for repeatable renders)
+  const jd = +(params.get('jd') || 0) || jdNow();
+  const bodies = initBodies(gpu, globalsBuf, base, jd);
 
   const state = { frozen: false, shot: null, snap: 1, frames: 0, skip: {} };   // skip: passes left out, for profiling
   // ---- view state
@@ -71,8 +76,8 @@ async function main() {
   // ---- names and constellation figures
   say('Reading names and constellations', 0.5);
   const [names, cons] = await Promise.all([fetch(base + 'names.json').then((r) => r.json()), fetch(base + 'constellations.json').then((r) => r.json())]);
-  const lines = initLines(gpu, globalsBuf, 4096), labels = initLabels(gpu, globalsBuf, () => pxScale);
-  const LG_CON = 0;
+  const lines = initLines(gpu, globalsBuf, 8192), labels = initLabels(gpu, globalsBuf, () => pxScale);
+  const LG_CON = 0, LG_ORBIT = 1;
   for (const c of cons) {
     let cx = 0, cy = 0, cz = 0; const np = c.pts.length / 3;
     for (const l of c.lines) for (let k = 1; k < l.length; k++) { const a = l[k - 1] * 3, b = l[k] * 3; lines.add(c.pts[a], c.pts[a + 1], c.pts[a + 2], c.pts[b], c.pts[b + 1], c.pts[b + 2], 0.05, 0.085, 0.17, 0.5, LG_CON); }
@@ -83,12 +88,24 @@ async function main() {
   }
   for (const s of names.stars) if (s[0]) labels.add(s[0] === 'Sol' ? 'Sun' : s[0], 'star', s[2], s[3], s[4], s[5]);
   gal.names.forEach((n, i) => { if (n[1]) labels.add(n[0], 'galaxy', gal.pos(i, 0), gal.pos(i, 1), gal.pos(i, 2), gal.absmag(i), Infinity, gal.radius(i) * 1.2, 0, gal.radius(i)); });
+  // planets: orbit lines (the ellipse each is on today) and names
+  {
+    const NP = 160, op = new Float64Array(NP * 3);
+    PLANETS.forEach((pl, i) => {
+      orbitPoints(i, NP, op, jd);
+      for (let k = 0; k < NP; k++) { const a = k * 3, b = ((k + 1) % NP) * 3; lines.add(op[a], op[a + 1], op[a + 2], op[b], op[b + 1], op[b + 2], 0.10, 0.13, 0.20, 0.5, LG_ORBIT); }
+      labels.add(pl.name, 'body', bodies.pos(i + 1, 0), bodies.pos(i + 1, 1), bodies.pos(i + 1, 2), NaN, 0.004, bodies.radius(i + 1) * 2.5, -10, bodies.radius(i + 1));
+    });
+  }
+  labels.occluder(bodies.hides);
+  place(0, bodies.night());
   const show = { lines: true, names: true, proc: true };
   const labelLimit = { star: 0, con: 0, body: 0, deep: 0, galaxy: 0 };
   const kindGain = { star: 1, con: 1, body: 1, deep: 1, galaxy: 1 };
 
   // start at Earth's distance from the Sun, facing Orion with celestial north up
-  setPose(+(params.get('pose') || 1) - 1);
+  if (params.has('pose')) setPose(+params.get('pose') - 1);
+  else { const s = bodies.launch(); cam.p.set(s.p); lookQuat(cam.q, s.at[0] - s.p[0], s.at[1] - s.p[1], s.at[2] - s.p[2], s.up[0], s.up[1], s.up[2]); basis(); }
 
   const magCap = +(params.get('mag') || 13);   // ?mag=6 caps the faintest star drawn (keeps software test rigs fast)
   let exposureBase = 32, exposure = 32, showPerf = false, hudT = 0;
@@ -158,6 +175,7 @@ async function main() {
   const dts = new Float32Array(128), dtSort = new Float32Array(128);
   let busy = false, conFade = 1, nameFade = 1, labelT = 1, pointGain = 1, procFade = 1;
   const DIFFUSE = 20;   // extended light is lifted relative to point sources, as dark-adapted eyes do
+  const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   function frame(now) {
     requestAnimationFrame(frame);
     const dt = Math.min(0.1, (now - last) / 1000); last = now;
@@ -171,7 +189,10 @@ async function main() {
     if (gn.id >= 0) ctx = Math.min(ctx, Math.max(gn.edge, gal.radius(gn.id) * 0.03));
     if (show.proc) ctx = Math.min(ctx, gn.spacing);
     flight.context = Math.min(ctx, 3e8);
+    const bn = bodies.near;
+    if (bn.id >= 0) flight.context = Math.min(flight.context, Math.max(bn.alt, bodies.radius(bn.id) * 0.02));
     if (!state.frozen) updateFlight(dt); else basis();
+    bodies.update();
 
     // how far outside the nearest galaxy's disc the camera is, in units that make 0..1 "inside" (see adaptation below)
     let out = 1e3, env = 1e9;
@@ -184,7 +205,6 @@ async function main() {
     //  - down, when a nearby star is in view
     //  - up by a few magnitudes once outside a galaxy's disc, so its surface brightness reads well
     //  - (points only) up further in the voids, so that distant galaxies show: pointGain
-    const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
     const gainSB = 2.1 * sm(0.6, 2.0, out) + 1.0 * sm(3, 30, env);
     const gainPt = Math.min(6.5, 2.6 * Math.log10(Math.max(env / 1.3, 1)));
     const n = stars.near;
@@ -221,6 +241,8 @@ async function main() {
     conFade += ((show.lines ? 1 : 0) - conFade) * (1 - Math.exp(-dt * 5));
     const conVis = conFade * Math.max(0, Math.min(1, 1 - Math.log10(Math.max(fromSol, 1) / 150) / Math.log10(1000 / 150)));
     lines.gain[LG_CON] = conVis * Math.min(1, Math.sqrt(exposure / 32));
+    // orbits: shown across the Solar System, fading close to a planet and out past the Kuiper belt
+    lines.gain[LG_ORBIT] = conFade * sm(15, 150, bn.alt / bodies.radius(Math.max(bn.id, 0))) * (1 - sm(-3.3, -2.3, Math.log10(Math.max(fromSol, 1e-9))));
     lines.update();
     nameFade += ((show.names ? 1 : 0) - nameFade) * (1 - Math.exp(-dt * 5));
     kindGain.con = conVis; kindGain.star = kindGain.body = kindGain.deep = kindGain.galaxy = nameFade;
@@ -242,6 +264,7 @@ async function main() {
     if (!sk.galPts) galPts.draw(pass, pointGain);
     if (!sk.lines) lines.draw(pass);
     if (!sk.stars) stars.draw(pass, starGain);
+    if (!sk.bodies) bodies.draw(pass);
     if (!sk.labels) labels.draw(pass);
     pass.end();
     post.run(enc, gpu.offscreen ? offView : gpu.ctx.getCurrentTexture().createView(), time, 0.09, ts && !ts.busy ? tsEnd : undefined);
@@ -283,10 +306,10 @@ async function main() {
     if (hudT > 0.2) {
       hudT = 0;
       $('hs').textContent = fmtSpeed(flight.speed);
-      $('hd').textContent = fmtDist(Math.hypot(cam.p[0], cam.p[1], cam.p[2]));
+      $('hd').textContent = fmtDist(Math.hypot(cam.p[0] - bodies.pos(3, 0), cam.p[1] - bodies.pos(3, 1), cam.p[2] - bodies.pos(3, 2)) - (bn.id === 3 ? bodies.radius(3) : 0));
       const fromMW = gal.near.id === 0 ? 0 : Math.hypot(cam.p[0] - gal.pos(0, 0), cam.p[1] - gal.pos(0, 1), cam.p[2] - gal.pos(0, 2));
       $('scale').textContent = fromSol < 0.01 ? 'Solar System' : fromSol < 1500 ? 'Stellar neighbourhood' : fromMW < 60000 ? 'Milky Way' : fromMW < 1.6e6 ? 'Local Group' : 'Cosmic web';
-      $('hn').textContent = n.dist < 30 ? fmtDist(n.dist) : gn.id >= 0 ? gal.names[gn.id][0] + '  ' + fmtDist(gn.dist) : '';
+      $('hn').textContent = bn.alt < 2e-6 ? bodies.names[bn.id] + '  ' + fmtDist(bn.alt) : n.dist < 30 ? fmtDist(n.dist) : gn.id >= 0 ? gal.names[gn.id][0] + '  ' + fmtDist(gn.dist) : '';
       if (showPerf) { const s = stars.stats(), g2 = galPts.stats(); $('perf').textContent = `${fps.toFixed(0)} fps  gpu ${gpuMs.toFixed(2)} ms  cpu ${cpuMs.toFixed(2)} ms\n${W}x${H}  scale ${resScale.toFixed(2)}\n${s.drawn.toLocaleString()} stars in ${s.tiles} tiles\n${s.loaded.toLocaleString()} loaded, ${s.pending} pending\nexposure ${exposure.toPrecision(3)}  mag ${magLimit.toFixed(1)} / ${galLimit.toFixed(1)}\n${g2.drawn.toLocaleString()} galaxies`; }
     }
   }
@@ -309,6 +332,6 @@ async function main() {
     const budget = period * 1000;
     return { frameMs: stat(b.frame), gpuMs: stat(b.gpu), late: b.frame.filter((x) => x > budget * 1.6).length, gpuOver: b.gpu.filter((x) => x > 8.3).length, size: [W, H], scale: resScale, level: LEVEL, mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null };
   };
-  window.SH = { bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
+  window.SH = { bodies, bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
 }
 main().catch((e) => { console.error(e); body.className = 'l e'; $('s').textContent = (e.cause ? '' : 'Failed to start: ') + e.message; });
