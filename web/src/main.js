@@ -406,8 +406,8 @@ async function main() {
   }
   say('Loading the nearest stars', 0.7);
   requestAnimationFrame(frame);
-  // ready once the tiles needed for the first view have arrived
-  await new Promise((r) => { const t = setInterval(() => { const s = stars.stats(); if (s.tiles > 0 && s.pending === 0 && galPts.stats().pending === 0) { clearInterval(t); r(); } }, 100); });
+  // ready as soon as the first star tile (the brightest stars everywhere) is in: the rest streams in behind it
+  await new Promise((r) => { const t = setInterval(() => { if (stars.stats().tiles > 0) { clearInterval(t); r(); } }, 50); });
   say('Ready', 1); $('go').disabled = false; body.classList.remove('l');
   keep('starhopperLoad', '');
   try { localStorage.removeItem('starhopperLoad'); } catch {}
