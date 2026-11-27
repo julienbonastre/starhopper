@@ -56,6 +56,11 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 #ctx #ctxgo { color: #000; background: var(--fg); }
 #ver { opacity: .65; font-variant-numeric: tabular-nums; }
 #ver a { color: var(--acc); cursor: pointer; text-decoration: underline; }
+#thr { display: none; position: fixed; z-index: 4; right: 0; top: 0; bottom: 0; width: 76px; pointer-events: none; }
+#thr i { position: absolute; left: 50%; top: 18%; bottom: 18%; width: 4px; margin-left: -2px; border-radius: 2px; background: linear-gradient(#ffffff30, #ffffff0c 50%, #ffffff30); }
+#thr b { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; border: 1px solid #ffffff55; background: #ffffff14; }
+#thr b.on { background: #ffffff38; border-color: #fff; }
+@media (pointer: coarse) { body.fly #thr { display: block; } }
 #tk { display: none; margin-top: 14px; font-size: 12px; color: var(--dim); line-height: 1.7; }
 @media (pointer: coarse) { #tk { display: block; } }
 #turn { display: none; position: fixed; inset: 0; z-index: 9; background: #000; place-items: center; text-align: center; letter-spacing: .22em; text-transform: uppercase; font-size: 12px; color: var(--dim); }
@@ -69,6 +74,7 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 <div id="perf" hidden></div>
 <button id="menu" aria-label="Menu">&#8801;</button>
 <div id="turn">Turn your phone sideways</div>
+<div id="thr"><i></i><b id="thrk"></b></div>
 <div id="ctx" hidden><div id="ctxn"></div><button id="ctxgo">Fly here</button><button id="ctxno">Not now</button></div>
 <div id="veil"><div id="card">
 <h1>Starhopper</h1>
@@ -80,7 +86,7 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 <kbd>W A S D</kbd><span>fly</span><kbd>Mouse</kbd><span>look</span><kbd>R / F</kbd><span>up / down</span><kbd>Q / E</kbd><span>roll</span>
 <kbd>Wheel</kbd><span>throttle</span><kbd>Shift / Ctrl</kbd><span>&times;10 / &divide;10</span><kbd>Click</kbd><span>target what you look at</span><kbd>G</kbd><span>fly to the target</span><kbd>1 &ndash; 8</kbd><span>viewpoints</span><kbd>Home</kbd><span>back to Earth</span><kbd>L N X P</kbd><span>lines, names, exoplanet hosts, fill</span><kbd>M</kbd><span>sound</span><kbd>[ ]</kbd><span>exposure</span><kbd>Tab / H</kbd><span>hide panel / frame stats</span><kbd>Esc</kbd><span>this menu</span>
 </div></details>
-<div id="tk">One finger: slide to steer and fly &middot; Two fingers: twist to roll, drag up or down for speed<br>Tap: target &middot; Double tap: fly there &middot; Hold: go-to menu</div>
+<div id="tk">Drag the sky to look around &middot; Right edge: push up to fly forward, pull down to back away<br>Two fingers: spread or pinch to fly, twist to roll<br>Tap: target &middot; Double tap: fly there &middot; Hold: go-to menu</div>
 <input id="find" type="search" placeholder="Fly to a star, planet, nebula or galaxy: Vega, Saturn, M 42, Andromeda ..." autocomplete="off" spellcheck="false">
 <div id="tg"><button data-k="lines">Constellations</button><button data-k="names">Names</button><button data-k="proc" class="on">Procedural fill</button><button data-k="exo">Exoplanet hosts</button><button data-k="sound">Sound</button></div>
 <div id="vp"></div>
