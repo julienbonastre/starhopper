@@ -38,6 +38,15 @@ async function main() {
   const globals = new ArrayBuffer(GLOBALS_SIZE), gf = new Float32Array(globals), gi = new Int32Array(globals);
   const globalsBuf = device.createBuffer({ size: GLOBALS_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const base = DATA_BASE;
+  // Which build this is. The host lets browsers keep the page for ten minutes, so a page can be older than the site:
+  // ask (uncached) what is deployed now and, if it is something else, offer it under an address the cache has not seen.
+  $('ver').textContent = (PREVIEW ? 'Preview of pull request #' + PREVIEW + ' \u00b7 ' : '') + 'Build ' + VERSION;
+  fetch('version.json?' + Date.now(), { cache: 'no-store' }).then((r) => r.json()).then((v) => {
+    if (!v.version || v.version === VERSION) return;
+    const a = document.createElement('a'); a.textContent = 'newer build available: load ' + v.version.split(' ')[0];
+    a.onclick = () => location.replace(location.pathname + '?b=' + encodeURIComponent(v.version.split(' ')[0]));
+    $('ver').append(' \u00b7 ', a);
+  }).catch(() => {});
   // a pull request's preview build says so, so that nobody takes it for the live site
   if (PREVIEW) { const b = document.createElement('div'); b.textContent = 'Preview of pull request #' + PREVIEW; b.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:9;padding:4px 9px;border-radius:999px;background:#c8102e;color:#fff;font:600 11px system-ui;letter-spacing:.04em;pointer-events:none'; document.body.append(b); }
   say('Reading the star and galaxy indexes', 0.3);
