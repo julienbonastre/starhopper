@@ -105,6 +105,8 @@ async function main() {
       for (let k = 0; k < NP; k++) { const a = k * 3, b = ((k + 1) % NP) * 3; lines.add(op[a], op[a + 1], op[a + 2], op[b], op[b + 1], op[b + 2], 0.10, 0.13, 0.20, 0.5, LG_ORBIT); }
       labels.add(pl.name, 'body', bodies.pos(i + 1, 0), bodies.pos(i + 1, 1), bodies.pos(i + 1, 2), NaN, 0.004, bodies.radius(i + 1) * 2.5, -10, bodies.radius(i + 1));
     });
+    const mn = bodies.count - 1;   // the Moon: named out to a few million kilometres
+    labels.add('Moon', 'body', bodies.pos(mn, 0), bodies.pos(mn, 1), bodies.pos(mn, 2), NaN, 2e-7, bodies.radius(mn) * 2.5, -10, bodies.radius(mn));
   }
   labels.occluder(bodies.hides);
   place(0, bodies.night());
@@ -201,14 +203,22 @@ async function main() {
   fetch(base + 'manifest.json').then((r) => r.json()).then((m) => {
     $('crb').innerHTML = m.sources.map((x) => `<p><a href="${x.home}" target="_blank" rel="noopener">${x.title}</a><br>${x.credit}. ${x.licence}.</p>`).join('') + '<p>Procedural fill (galaxy shapes, the Milky Way beyond the catalogue, fill stars) is a model, not data. Press P to hide it.</p>';
   }).catch(() => {});
+  // back to low orbit over the daylight side, where every visit begins
+  const toEarth = () => { const s = bodies.launch(); cancelGoto(); flight.vel.fill(0); flight.thr = 0; cam.p.set(s.p); lookQuat(cam.q, s.at[0] - s.p[0], s.at[1] - s.p[1], s.at[2] - s.p[2], s.up[0], s.up[1], s.up[2]); basis(); state.snap = 1; };
   const launch = () => {
     body.classList.add('fly');
+    // from now on the menu is a pause: its main button resumes, and a second one starts over from the Earth
+    $('go').textContent = 'Resume'; $('home').hidden = false; $('x').hidden = false;
     if (show.sound) { show.sound = setSound(true); syncToggles(); }
     // phones fly in landscape: full screen first, since the orientation can only be locked there
     if (MOBILE) document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
     else canvas.requestPointerLock?.()?.catch?.(() => {});
   };
   $('go').onclick = launch;
+  $('home').onclick = () => { toEarth(); launch(); flash('Earth'); };
+  $('x').onclick = launch;
+  $('veil').onclick = (e) => { if (e.target === $('veil') && !$('x').hidden) launch(); };   // a tap beside the menu goes back to the flight
+  $('cz').onclick = () => { flight.cruise = !flight.cruise; $('cz').classList.toggle('on', flight.cruise); if (!flight.cruise) flight.thr = 0; flash(flight.cruise ? 'Holding speed' : 'Speed released'); };
   // a click looks at what is dead ahead (the pointer is locked to the view) and targets it
   // (a mouse click only: the click a phone makes up after a tap must not lock the pointer, which swallows every touch after it)
   canvas.onclick = (e) => { if (!body.classList.contains('fly') || MOBILE || (e.pointerType && e.pointerType !== 'mouse')) return; if (flight.locked) pick(cam.fwd[0], cam.fwd[1], cam.fwd[2]); else canvas.requestPointerLock?.()?.catch?.(() => {}); };
@@ -332,8 +342,9 @@ async function main() {
       const cosA = (dx * cam.fwd[0] + dy * cam.fwd[1] + dz * cam.fwd[2]) / d;
       const inView = Math.max(0, Math.min(1, (cosA - 0.72) / 0.16));     // only while it is on screen: there is no air out here to scatter it
       const e1 = Math.pow(10, -0.4 * n.absmag) * 100 / (d * d);         // its energy at exposure 1
-      // only part of the way: the star still glares, and the brightest background stars stay in sight
-      if (e1 * inView * aim > E_MAX) aim *= Math.pow(E_MAX / (e1 * inView * aim), 0.22);
+      // only part of the way, and never by more than a magnitude and a bit: the star glares, but the sky around it
+      // stays full of stars however squarely it is faced
+      if (e1 * inView * aim > E_MAX) aim *= Math.max(0.3, Math.pow(E_MAX / (e1 * inView * aim), 0.22));
     }
     if (state.snap) { exposure = aim; pointGain = Math.pow(10, 0.4 * gainPt); if (state.snap++ > 3) state.snap = 0; }
     exposure *= Math.pow(aim / exposure, 1 - Math.exp(-dt * (aim < exposure ? 6 : 1.5)));

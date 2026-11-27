@@ -12,6 +12,7 @@ export const flight = {
   tapX: 0, tapY: 0,            // where the last touch tap landed (CSS pixels)
   menu: false,                 // a touch-and-hold menu is open: the finger that opened it does not steer
   thr: 0,                      // the touch throttle strip, -1 (back) .. 1 (forward)
+  cruise: false,               // the strip stays where it is let go (the Hold button), so the flight carries on hands-free
 };
 const keys = new Set(), EDGE = 1.5e9;   // parsecs
 let lookX = 0, lookY = 0, touchX = 0, touchY = 0, touchFwd = 0;
@@ -36,12 +37,12 @@ export function initInput(canvas, onAction) {
   const tp = new Map(); let pinch0 = 0, twist = 0, rolling = false, two = false, downT = 0, lastTap = 0, holdTimer = 0, thrId = -1;
   const HOLD_MS = 450, SLOP = 12, STRIP = 76;
   const looks = () => { const a = []; for (const [id, t] of tp) if (id !== thrId) a.push(t); return a; };
-  const reset = () => { tp.clear(); thrId = -1; two = false; flight.thr = 0; touchFwd = 0; clearTimeout(holdTimer); };
+  const reset = () => { tp.clear(); thrId = -1; two = false; if (!flight.cruise) flight.thr = 0; touchFwd = 0; clearTimeout(holdTimer); };
   canvas.addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'touch') return;
     if (e.isPrimary) reset();                         // a first finger: whatever was left over from a lost touch is void
     try { canvas.setPointerCapture(e.pointerId); } catch { /* the pointer is already gone */ }
-    tp.set(e.pointerId, { x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, moved: false });
+    tp.set(e.pointerId, { x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, moved: false, v0: flight.cruise ? flight.thr : 0 });
     if (flight.menu) { flight.menu = false; onAction('Touch'); }               // any new touch puts the hold menu away
     clearTimeout(holdTimer);
     if (thrId < 0 && e.clientX > innerWidth - STRIP) { thrId = e.pointerId; return; }
@@ -54,7 +55,7 @@ export function initInput(canvas, onAction) {
     const dx = e.clientX - t.x, dy = e.clientY - t.y;
     t.x = e.clientX; t.y = e.clientY;
     if (Math.hypot(t.x - t.x0, t.y - t.y0) > SLOP) t.moved = true;
-    if (e.pointerId === thrId) { const v = Math.max(-1, Math.min(1, (t.y0 - t.y) / (innerHeight * 0.32))); flight.thr = Math.abs(v) < 0.08 ? 0 : v; return; }
+    if (e.pointerId === thrId) { const v = Math.max(-1, Math.min(1, t.v0 + (t.y0 - t.y) / (innerHeight * 0.32))); flight.thr = Math.abs(v) < 0.08 ? 0 : v; return; }
     const l = looks();
     if (l.length === 1 && t.moved && !flight.menu) { touchX += dx; touchY += dy; }
     else if (l.length === 2) {
@@ -71,7 +72,7 @@ export function initInput(canvas, onAction) {
   const up = (e) => {
     const t = tp.get(e.pointerId); if (!t) return;
     tp.delete(e.pointerId); clearTimeout(holdTimer);
-    if (e.pointerId === thrId) { thrId = -1; flight.thr = 0; return; }
+    if (e.pointerId === thrId) { thrId = -1; if (!flight.cruise) flight.thr = 0; return; }
     pinch0 = 0; touchFwd = 0; rolling = false;
     if (!two && !flight.menu && performance.now() - downT < 220 && !t.moved) { const now = performance.now(), dbl = now - lastTap < 380; lastTap = dbl ? 0 : now; flight.tapX = t.x; flight.tapY = t.y; onAction(dbl ? 'DoubleTap' : 'Tap'); }
     if (!looks().length) two = false;

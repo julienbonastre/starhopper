@@ -93,6 +93,21 @@ export function orbitPoints(i, n, out, jd = J2000) {
   return out;
 }
 
+export const MOON = { name: 'Moon', radius: 1737.4, color: [0.52, 0.5, 0.47] };
+// The Moon from the Earth's centre at jd, into out[0..2] in parsecs, equatorial J2000. The Astronomical Almanac's
+// low-precision series (about 0.3 degrees in longitude, 0.2 in latitude, 0.2% in distance), which is for the
+// equinox of the date, so the precession since J2000 is taken off the longitude.
+export function moonPos(jd, out) {
+  const T = (jd - J2000) / 36525, s = (a, b) => Math.sin((a + b * T) * DEG), c = (a, b) => Math.cos((a + b * T) * DEG);
+  const lon = (218.32 + 481267.881 * T + 6.29 * s(135.0, 477198.87) - 1.27 * s(259.3, -413335.36) + 0.66 * s(235.7, 890534.22)
+    + 0.21 * s(269.9, 954397.74) - 0.19 * s(357.5, 35999.05) - 0.11 * s(186.5, 966404.03) - 1.39697 * T) * DEG;
+  const lat = (5.13 * s(93.3, 483202.02) + 0.28 * s(228.2, 960400.89) - 0.28 * s(318.3, 6003.15) - 0.17 * s(217.6, -407332.21)) * DEG;
+  const par = (0.9508 + 0.0518 * c(135.0, 477198.87) + 0.0095 * c(259.3, -413335.36) + 0.0078 * c(235.7, 890534.22) + 0.0028 * c(269.9, 954397.74)) * DEG;
+  const r = 6378.14 / Math.sin(par) / 3.0856775814913673e13, cb = Math.cos(lat), x = cb * Math.cos(lon), y = cb * Math.sin(lon), z = Math.sin(lat);
+  out[0] = r * x; out[1] = r * (CE * y - SE * z); out[2] = r * (SE * y + CE * z);
+  return out;
+}
+
 // Julian date of the system clock (UTC).
 export const jdNow = () => Date.now() / 86400000 + 2440587.5;
 
