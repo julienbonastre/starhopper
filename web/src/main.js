@@ -320,8 +320,9 @@ async function main() {
       const cosA = (dx * cam.fwd[0] + dy * cam.fwd[1] + dz * cam.fwd[2]) / d;
       const inView = Math.max(0, Math.min(1, (cosA - 0.72) / 0.16));     // only while it is on screen: there is no air out here to scatter it
       const e1 = Math.pow(10, -0.4 * n.absmag) * 100 / (d * d);         // its energy at exposure 1
-      // only part of the way: the star still glares, and the brightest background stars stay in sight
-      if (e1 * inView * target > E_MAX) target *= Math.pow(E_MAX / (e1 * inView * target), 0.22);
+      // only part of the way, and never by more than a magnitude and a bit: the star glares, but the sky around it
+      // stays full of stars however squarely it is faced
+      if (e1 * inView * target > E_MAX) target *= Math.max(0.3, Math.pow(E_MAX / (e1 * inView * target), 0.22));
     }
     if (state.snap) { exposure = target; pointGain = Math.pow(10, 0.4 * gainPt); if (state.snap++ > 3) state.snap = 0; }
     exposure *= Math.pow(target / exposure, 1 - Math.exp(-dt * (target < exposure ? 6 : 1.5)));
