@@ -42,8 +42,8 @@ fn galParams(t: u32, flat: f32, seed: u32) -> GalP {
 // Surface brightness is shown as the flux falling on one pixel of a reference view (1000 px tall, 60 degrees), so the
 // balance between stars and extended light does not depend on the window size.
 const OMEGA = 1.3333e-6;
-const OLD = vec3f(1.0, 0.86, 0.68);
-const YOUNG = vec3f(0.60, 0.76, 1.0);
+const OLD = vec3f(1.0, 0.79, 0.54);
+const YOUNG = vec3f(0.66, 0.80, 1.0);
 const HII = vec3f(1.0, 0.28, 0.42);
 // emission (rgb, luminosity per unit volume for a galaxy of unit radius and unit luminosity) and dust (a) at q.
 // Fractal noise for structure, five octaves from about a thirteenth of the radius down. Each octave is used only
@@ -101,7 +101,7 @@ fn galEmit(q: vec3f, qn: vec3f, p: GalP, sd: f32, detail: f32, t: f32, foot: f32
   // inside) the lane breaks up into rifts and windows instead of one ruled line.
   let zd = abs(q.z + (n1 - 0.5) * p.hz * 1.3 * detail);
   let cloud = mix(1.0, 5.0 * smoothstep(0.46, 0.64, nf * 0.45 + nc * 0.55), detail);
-  let dust = (1.0 - p.fb) * exp(-r / (p.h * 1.5) - zd / (p.hz * 0.7)) * (0.2 + 2.4 * cd * cd * cd * cd * inner * p.armC + p.clump) * cloud * (1.0 - smoothstep(1.0, 1.5, r));
+  let dust = (1.0 - p.fb) * exp(-r / (p.h * 1.5) - zd / (p.hz * 0.32)) * (0.2 + 2.4 * cd * cd * cd * cd * inner * p.armC + p.clump) * 1.9 * cloud * (1.0 - smoothstep(1.0, 1.5, r));
   return vec4f(col, dust);
 }
 `;
