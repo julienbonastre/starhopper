@@ -301,20 +301,25 @@ async function main() {
   $('tbgo').onclick = () => { if (flight.goto) cancelGoto(); else if (target.on) { (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9)); flash(target.name); } };
   // The info card: what the catalogue says about the target, then a few lines and a picture from Wikipedia if it
   // has a page that is plainly about this object. Built with text nodes only: nothing fetched is parsed as HTML.
-  let infoRow = null;
+  let infoRow = null, infoAt = 0;
+  const infoEl = (tag, text) => { const e = document.createElement(tag); e.textContent = text; return e; };
+  function showFacts(r) {
+    const cd = Math.hypot(r[2] - cam.p[0], r[3] - cam.p[1], r[4] - cam.p[2]), ed = Math.hypot(r[2] - bodies.pos(3, 0), r[3] - bodies.pos(3, 1), r[4] - bodies.pos(3, 2));
+    const f = facts(r, cd, ed);
+    $('inff').replaceChildren(...f.facts.flatMap(([k, v]) => [infoEl('dt', k), infoEl('dd', v)]));
+    $('infl').textContent = f.line; $('infl').hidden = !f.line;
+    infoAt = performance.now();
+    return f.line;
+  }
   function showInfo(on) {
     $('info').classList.toggle('on', on && target.on); $('tbi').classList.toggle('on', on && target.on);
     if (!on || !target.on) { infoRow = null; return; }
-    const r = infoRow = target.row, el = (tag, text) => { const e = document.createElement(tag); e.textContent = text; return e; };
-    const cd = Math.hypot(r[2] - cam.p[0], r[3] - cam.p[1], r[4] - cam.p[2]), ed = Math.hypot(r[2] - bodies.pos(3, 0), r[3] - bodies.pos(3, 1), r[4] - bodies.pos(3, 2));
-    const f = facts(r, cd, ed);
+    const r = infoRow = target.row, line = showFacts(r), el = infoEl;
     $('infn').textContent = r[1] === 'Sol' ? 'Sun' : r[1];
-    $('inff').replaceChildren(...f.facts.flatMap(([k, v]) => [el('dt', k), el('dd', v)]));
-    $('infl').textContent = f.line; $('infl').hidden = !f.line;
     $('infw').replaceChildren(el('small', 'Looking it up \u2026'));
     wiki(r).then((w) => {
       if (infoRow !== r) return;
-      if (!w) { $('infw').replaceChildren(el('small', f.line ? '' : 'No further information found for this object.')); return; }
+      if (!w) { $('infw').replaceChildren(el('small', line ? '' : 'No further information found for this object.')); return; }
       const kids = [];
       if (w.img && /^https:\/\/(upload|thumb)\.wikimedia\.org\//.test(w.img)) { const im = document.createElement('img'); im.src = w.img; im.alt = w.title; im.referrerPolicy = 'no-referrer'; kids.push(im); }
       kids.push(el('p', w.text));
@@ -421,7 +426,7 @@ async function main() {
   let last = performance.now(), time = 0, frames = 0, fpsT = 0, fps = 0, cpuMs = 0;
   const dts = new Float32Array(128), dtSort = new Float32Array(128);
   let busy = false, exoFade = 0, conFade = 0, nameFade = 0, labelT = 1, pointGain = 1, procFade = 1;
-  let starCtx = 1, wasGoing = false;
+  let starCtx = 1;
   const trail = new Float64Array(3), trailP = new Float64Array(3), rode = new Float64Array(3);   // streak vector, last camera place, how far a planet carried the camera this frame
   const DIFFUSE = 24;   // extended light is lifted relative to point sources, as dark-adapted eyes do
   const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -447,16 +452,13 @@ async function main() {
     flight.context = Math.min(ctx, 3e8);
     const bn = bodies.near;
     if (bn.id >= 0) flight.context = Math.min(flight.context, Math.max(bn.alt, bodies.radius(bn.id) * 0.02));
-    // a fly-to that has just ended leaves the throttle at rest, not at whatever pace it was being hurried along at
-    if (wasGoing && !flight.goto && flight.thr) halt();
-    wasGoing = !!flight.goto;
     tick(now);   // the clock first, so that the flight, the lock and the picture all use this frame's positions
     // Lock: the camera keeps facing the target, and its range changes only while thrust toward or away from it is on,
     // so thrust sideways or up and down carries it around the target in a circle.
     const locked = flight.lock && target.on && !flight.goto && !state.frozen;
     let lx = 0, ly = 0, lz = 0, ld = 0, p0x = cam.p[0], p0y = cam.p[1], p0z = cam.p[2];
     if (locked) { lx = target.x - p0x; ly = target.y - p0y; lz = target.z - p0z; ld = Math.hypot(lx, ly, lz); }
-    if (!state.frozen) updateFlight(dt); else basis();
+    if (!state.frozen) { if (updateFlight(dt)) halt(); } else basis();
     if (locked && ld > 0) {
       const toward = ((cam.p[0] - p0x) * lx + (cam.p[1] - p0y) * ly + (cam.p[2] - p0z) * lz) / ld, floor = target.stop * 0.25, want = flight.ahead ? Math.max(ld - toward, floor) : ld;
       // as close as the lock goes: a throttle still pushing would only read as speed that goes nowhere
@@ -476,6 +478,7 @@ async function main() {
         labels.move(tgtLabel, '\u25C7 ' + r[1], r[2], r[3], r[4], r[8]);
       }
     }
+    if (infoRow && infoRow === target.row && now - infoAt >= 500) showFacts(infoRow);
     if (flight.sx !== joyX || flight.sy !== joyY) { joyX = flight.sx; joyY = flight.sy; const k = $('joyk'); k.style.transform = `translate(${(joyX * 26).toFixed(1)}px,${(-joyY * 26).toFixed(1)}px)`; k.className = joyX || joyY ? 'on' : ''; }
     if (flight.thr !== thrShown) { thrShown = flight.thr; const k = $('thrk'); k.style.transform = `translateY(${(-thrShown * innerHeight * 0.32).toFixed(1)}px)`; k.className = thrShown ? 'on' : ''; }
     bodies.update();

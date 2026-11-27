@@ -154,7 +154,7 @@ export function updateFlight(dt) {
     const ox = cam.p[0], oy = cam.p[1], oz = cam.p[2];
     for (let a = 0; a < 3; a++) cam.p[a] = go.from[a] + (go.to[a] - go.from[a]) * f;
     flight.speed = dt > 0 ? Math.hypot(cam.p[0] - ox, cam.p[1] - oy, cam.p[2] - oz) / dt : 0;
-    if (go.t >= 1) cancelGoto();
+    if (go.t >= 1) { cancelGoto(); return true; }
     return;
   }
   const boost = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 10 : 1) * (keys.has('ControlLeft') || keys.has('ControlRight') ? 0.1 : 1);

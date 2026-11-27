@@ -39,11 +39,11 @@ export function facts(row, camDist, earthDist) {
     if (b[4]) out.push(['Moons', b[4]]);
     return { facts: out, line: b[5] };
   }
-  out.push(['From the Earth', dist(fromSun)]);
+  out.push(['From the Earth', dist(earthDist)]);
   if (kind === 0) {
     if (absmag < 25) {
       out.push(['Light', suns(absmag)]);
-      const m = absmag + 5 * Math.log10(Math.max(fromSun, 1e-9) / 10);
+      const m = absmag + 5 * Math.log10(Math.max(earthDist, 1e-9) / 10);
       out.push(['From the Earth’s sky', 'magnitude ' + m.toFixed(1) + (m < 6.5 ? ' (visible to the eye)' : m < 10 ? ' (binoculars)' : ' (a telescope)')]);
     }
     const pl = /, (\d+) planets?$/.exec(name);
