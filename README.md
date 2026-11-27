@@ -16,7 +16,7 @@ Rendered with WebGPU and no engine. Everything on screen is either a public cata
 |---|---|
 | `W A S D`, mouse | fly and look (click the view to capture the mouse) |
 | `R` / `F`, `Q` / `E` | up / down, roll |
-| wheel, `Shift`, `Ctrl` | speed: exponential, and it follows how close things are |
+| scroll (two fingers on a trackpad) or `+` `-`, `Shift`, `Ctrl` | speed: exponential, and it follows how close things are |
 | click, then `G` | target what you are looking at, then fly to it |
 | `1` to `8`, `Home` | the fixed viewpoints, back to Earth |
 | `L` `N` `X` | constellation figures, names, stars with known planets |

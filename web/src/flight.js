@@ -90,7 +90,7 @@ export function initInput(canvas, onAction) {
   // a touch the browser took away without telling (a system gesture, the app going to the background) must not
   // leave a finger "down" for ever
   addEventListener('blur', reset); document.addEventListener('visibilitychange', reset);
-  canvas.addEventListener('wheel', (e) => { e.preventDefault(); flight.throttle = Math.max(-3, Math.min(4, flight.throttle - Math.sign(e.deltaY) * 0.1)); }, { passive: false });
+  canvas.addEventListener('wheel', (e) => { e.preventDefault(); /* a wheel notch is a tenth of a decade; a trackpad's stream of small scrolls adds up to the same per swipe */ const dy = e.deltaMode ? e.deltaY * 33 : e.deltaY; flight.throttle = Math.max(-3, Math.min(4, flight.throttle - Math.max(-50, Math.min(50, dy)) * 0.002)); }, { passive: false });
 }
 
 // start an eased flight to a point, stopping `stop` parsecs short of it

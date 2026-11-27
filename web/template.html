@@ -73,6 +73,8 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 #joy::before, #joy::after { content: ''; position: absolute; left: 50%; top: 50%; background: #ffffff18; }
 #joy::before { width: 70%; height: 1px; margin-left: -35%; } #joy::after { height: 70%; width: 1px; margin-top: -35%; }
 @media (pointer: coarse) { body.fly #thr { display: block; } body.fly #cz { display: block; } body.fly #joy { display: block; } }
+#xh { display: none; position: fixed; z-index: 3; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; opacity: .55; background: linear-gradient(#fff, #fff) 50% 50% / 14px 1px no-repeat, linear-gradient(#fff, #fff) 50% 50% / 1px 14px no-repeat; mix-blend-mode: difference; }
+@media (pointer: fine) { body.fly #xh { display: block; } }
 #arr { display: none; position: fixed; z-index: 3; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
 body.fly #arr.on { display: block; }
 #arr i { position: absolute; left: -11px; top: -9px; border-left: 20px solid var(--acc); border-top: 9px solid transparent; border-bottom: 9px solid transparent; filter: drop-shadow(0 0 4px #000); }
@@ -107,6 +109,7 @@ body.fly #tb.on { display: flex; }
 <button id="cz" aria-label="Hold the speed">Hold</button>
 <div id="joy"><b id="joyk"></b></div>
 <div id="arr"><i></i></div>
+<div id="xh"></div>
 <div id="tb"><span id="tbn"></span><button id="tbgo">Fly there</button><button id="tblk" aria-label="Keep facing the target and circle it">Lock</button><button id="tbx" aria-label="Clear the target">&times;</button></div>
 <div id="ctx" hidden><div id="ctxn"></div><button id="ctxgo">Fly here</button><button id="ctxno">Just target</button></div>
 <button id="x" hidden aria-label="Back to the flight">&times;</button>
@@ -118,7 +121,7 @@ body.fly #tb.on { display: flex; }
 <div id="s">Starting up</div>
 <details id="kd"><summary>Controls</summary><div id="keys">
 <kbd>W A S D</kbd><span>fly</span><kbd>Mouse</kbd><span>look</span><kbd>R / F</kbd><span>up / down</span><kbd>Q / E</kbd><span>roll</span>
-<kbd>Wheel</kbd><span>throttle</span><kbd>Shift / Ctrl</kbd><span>&times;10 / &divide;10</span><kbd>Click</kbd><span>target what you look at</span><kbd>G</kbd><span>fly to the target</span><kbd>O</kbd><span>lock on to it: sideways keys circle it</span><kbd>1 &ndash; 8</kbd><span>viewpoints</span><kbd>Home</kbd><span>back to Earth</span><kbd>L N X P</kbd><span>lines, names, exoplanet hosts, fill</span><kbd>M</kbd><span>sound</span><kbd>[ ]</kbd><span>exposure</span><kbd>Tab / H</kbd><span>hide panel / frame stats</span><kbd>Esc</kbd><span>this menu</span>
+<kbd>Scroll</kbd><span>throttle (two fingers on a trackpad, or <b>+</b> and <b>&minus;</b>)</span><kbd>Shift / Ctrl</kbd><span>&times;10 / &divide;10</span><kbd>Click</kbd><span>target what is under the small cross in the middle</span><kbd>G</kbd><span>fly to the target</span><kbd>O</kbd><span>lock on to it: sideways keys circle it</span><kbd>1 &ndash; 8</kbd><span>viewpoints</span><kbd>Home</kbd><span>back to Earth</span><kbd>L N X P</kbd><span>lines, names, exoplanet hosts, fill</span><kbd>M</kbd><span>sound</span><kbd>[ ]</kbd><span>exposure</span><kbd>Tab / H</kbd><span>hide panel / frame stats</span><kbd>Esc</kbd><span>this menu</span>
 </div></details>
 <div id="tk">Drag the sky to look around &middot; Right edge: push up to fly forward, pull down to back away &middot; Hold button: keep that speed<br>Bottom-left ring: slide sideways, up or down &middot; Two fingers: spread or pinch to fly, twist to roll<br>Tap: target, then Fly there &middot; Double tap: fly there at once &middot; Long press: go-to menu</div>
 <input id="find" type="search" placeholder="Find a star, planet, nebula or galaxy: Vega, Saturn, M 42, Andromeda ..." autocomplete="off" spellcheck="false">
