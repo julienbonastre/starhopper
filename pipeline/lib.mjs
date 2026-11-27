@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
@@ -21,6 +21,11 @@ export const sha256File = async (file) => {
 export async function fetchSource(src, { printSha = false } = {}) {
   mkdirSync(CACHE, { recursive: true });
   const file = path.join(CACHE, src.file);
+  // Live databases have no versioned release to pin: the bytes fetched from src.url on the stated date are kept in
+  // pipeline/snapshots and used in place of a fresh query. To refresh one, delete it there and in .cache, run with
+  // --print-sha, then copy the new .cache file back and update the checksum.
+  const kept = path.join(ROOT, 'pipeline', 'snapshots', src.file);
+  if (!existsSync(file) && existsSync(kept)) copyFileSync(kept, file);
   if (!existsSync(file)) {
     console.log(`  fetching ${src.url}`);
     let err;
