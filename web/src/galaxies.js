@@ -260,19 +260,36 @@ struct VO {
     let qa = sqrt(max(1.0 - sinI * sinI * (1.0 - P.qz * P.qz), 0.01));     // apparent axis ratio of the spheroid
     let rr = across2 + along * along / (qa * qa);
     var em = OLD * P.fb / (6.2831853 * qa * P.rb * P.rb) * pow(1.0 + rr / (P.rb * P.rb), -1.5) * (1.0 - smoothstep(1.0, 1.7, sqrt(rr)));
-    if (P.fb < 0.999 && t > 0.0) {
+    if (P.fb < 0.999) {
       // face-on basis in the disc plane
       let ax = normalize(cross(n, select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), abs(n.x) > 0.7)));
       let ay = cross(n, ax);
-      let q = vec3f(dot(hit, ax), dot(hit, ay), 0.0);
       var Ps = P; Ps.armC *= smoothstep(10.0, 60.0, i.prm.w);
-      // fine structure comes in gradually with size, so a small galaxy is a smooth smudge and never a few noise cells
-      let v = galEmit(q, q, Ps, f32(i.id.y & 1023u), smoothstep(45.0, 220.0, i.prm.w), 10.0, 1.0 / (i.prm.w * G.pxScale));
-      // the bulge's share of v, exactly as galEmit adds it (outer cut included: without it the difference goes
-      // negative past r = 1 and the disc ends in a hard edge)
-      let rq = dot(q.xy, q.xy);
-      let spher = OLD * P.fb / (9.8696 * P.qz * P.rb * P.rb * P.rb) * pow(1.0 + rq / (P.rb * P.rb), -2.0) * (1.0 - smoothstep(1.0, 1.7, sqrt(rq)));
-      em += max(v.rgb - spher, vec3f(0.0)) * 2.0 * P.hz / ka * exp(-v.a * 12.0 * P.hz / ka);
+      let sd = f32(i.id.y & 1023u); let detail = smoothstep(45.0, 220.0, i.prm.w); let foot = 1.0 / (i.prm.w * G.pxScale);
+      // Seen nearly edge-on, a sheet has no thickness to show and the clamped tilt would smear the disc into a
+      // striped band. There the ray is taken at its closest pass by the centre instead: the disc's light at that
+      // point in space, times the length of the path through the disc. The two views are blended by tilt.
+      let wE = 1.0 - smoothstep(0.12, 0.35, abs(dot(d, n)));
+      if (wE < 1.0 && t > 0.0) {
+        let q = vec3f(dot(hit, ax), dot(hit, ay), 0.0);
+        // fine structure comes in gradually with size, so a small galaxy is a smooth smudge and never a few noise cells
+        let v = galEmit(q, q, Ps, sd, detail, 10.0, foot);
+        // the bulge's share of v, exactly as galEmit adds it (outer cut included: without it the difference goes
+        // negative past r = 1 and the disc ends in a hard edge)
+        let rq = dot(q.xy, q.xy);
+        let spher = OLD * P.fb / (9.8696 * P.qz * P.rb * P.rb * P.rb) * pow(1.0 + rq / (P.rb * P.rb), -2.0) * (1.0 - smoothstep(1.0, 1.7, sqrt(rq)));
+        em += (1.0 - wE) * max(v.rgb - spher, vec3f(0.0)) * 2.0 * P.hz / ka * exp(-v.a * 12.0 * P.hz / ka);
+      }
+      if (wE > 0.0) {
+        let qe = vec3f(dot(off, ax), dot(off, ay), dot(off, n));
+        var Pe = Ps; Pe.armC *= 0.3;                                         // arms wash out along the line of sight
+        let v = galEmit(qe, qe, Pe, sd, detail * 0.5, 10.0, foot);
+        let s2 = dot(qe.xy, qe.xy) + qe.z * qe.z / (P.qz * P.qz);
+        let spher = OLD * P.fb / (9.8696 * P.qz * P.rb * P.rb * P.rb) * pow(1.0 + s2 / (P.rb * P.rb), -2.0) * (1.0 - smoothstep(1.0, 1.7, sqrt(s2)));
+        // path through an exponential disc passing a distance b from the centre: 2 b K1(b / h), near enough
+        let bb = length(qe.xy); let path = 2.0 * P.h * sqrt(1.0 + 1.2 * bb / P.h);
+        em += wE * max(v.rgb - spher, vec3f(0.0)) * path * exp(-v.a * 3.0 * path);
+      }
     }
     col += em * i.prm.y * omega * i.prm.z;
   }
