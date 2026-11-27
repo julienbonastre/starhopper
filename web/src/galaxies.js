@@ -52,17 +52,19 @@ const HII = vec3f(1.0, 0.28, 0.42);
 // the last so the lattices never line up. Returns the first three octaves and the weighted sum, all around 0.5.
 fn galNoise(q: vec3f, sd: f32, t: f32, foot: f32) -> vec4f {
   var p = vec3f(q.x * 0.8 - q.y * 0.6, q.x * 0.6 + q.y * 0.8, q.z * 2.2) * 13.0 + sd;
-  var c = 1.0 / 13.0; var amp = 0.5; var sum = 0.0;
+  var c = 1.0 / 13.0; var amp = 0.5; var sum = 0.0; var fine = 0.0;
   var o = vec3f(0.5);
   for (var i = 0; i < 5; i++) {
     let w = smoothstep(c * 1.2, c * 3.5, t) * (1.0 - smoothstep(c * 0.25, c * 0.6, foot));
-    if (w > 0.0) { let n = (vnoise(p) - 0.5) * w; sum += amp * n; if (i < 3) { o[i] = 0.5 + n; } }
+    if (w > 0.0) { let n = (vnoise(p) - 0.5) * w; sum += amp * n; if (i < 3) { o[i] = 0.5 + n; } if (i >= 2) { fine += amp * n; } }
     p = vec3f(p.x * 0.54 + p.y * 0.84, -p.x * 0.84 + p.y * 0.54, p.z) * 2.2 + 9.1; c /= 2.2; amp *= 0.82;
   }
-  return vec4f(o, 0.5 + sum);
+  return vec4f(0.5 + (o.x - 0.5) * 0.6 + (o.y - 0.5) * 0.4, o.z, 0.5 + fine * 1.7, 0.5 + sum);
 }
 // detail 0 skips the noise (used by the impostor's bulge-only path and by low settings).
-fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32, t: f32, foot: f32) -> vec4f {
+// qn: where the noise is looked up (the volume march keeps it on unjittered shells, so cloud detail finer than a
+// step survives; everything smooth uses the jittered q)
+fn galEmit(q: vec3f, qn: vec3f, p: GalP, sd: f32, detail: f32, t: f32, foot: f32) -> vec4f {
   let r2 = dot(q.xy, q.xy); let r = sqrt(r2);
   let s2 = r2 + q.z * q.z / (p.qz * p.qz);
   let bul = p.fb / (9.8696 * p.qz * p.rb * p.rb * p.rb) * pow(1.0 + s2 / (p.rb * p.rb), -2.0) * (1.0 - smoothstep(1.0, 1.7, sqrt(s2)));
@@ -71,7 +73,7 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32, t: f32, foot: f32) -> vec4f 
   let disc = (1.0 - p.fb) / (12.566 * p.h * p.h * p.hz) * exp(-r / p.h - az / p.hz) * (1.0 - smoothstep(0.75, 1.65, r));
   if (disc < 1e-4 && bul < 1e-4) { return vec4f(0.0); }
   let th = atan2(q.y, q.x) * p.wind;
-  var n1 = 0.5; var n2 = 0.5; var nf = 0.5; var wob = 0.0;
+  var n1 = 0.5; var n2 = 0.5; var nf = 0.5; var nc = 0.5; var wob = 0.0;
   // real arms are not ruled spirals: a slow wander in phase bends, forks and breaks them (on a lattice turned
   // away from the axes)
   if (detail > 0.0) { wob = (vnoise(vec3f(q.x * 1.9 + q.y * 1.6, q.y * 1.9 - q.x * 1.6, 0.37) + sd * 1.3) - 0.5) * 3.0 * detail; }
@@ -81,12 +83,12 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32, t: f32, foot: f32) -> vec4f 
   let inner = smoothstep(0.04, 0.22, r) * (1.0 - 0.6 * smoothstep(0.8, 1.4, r));     // arms calm down toward the rim
   let c4 = c * c * c * c;
   let arm = c4 * 2.85 + c2 * c2 * 0.59;                         // main arms + spurs; mean 1 around the circle
-  if (detail > 0.0) { let n = galNoise(q, sd, t, foot); n1 = 0.5 + (n.x - 0.5) * 0.6 + (n.y - 0.5) * 0.4; n2 = n.z; nf = n.w; }
+  if (detail > 0.0) { let n = galNoise(qn, sd, t, foot); n1 = n.x; n2 = n.y; nc = n.z; nf = n.w; }
   let clumps = mix(1.0, 0.25 + 1.5 * n1, p.clump * (0.5 + 0.5 * detail));
   // star formation is patchy along the arms: they break into bright stretches and gaps
   let knot = mix(1.0, 0.3 + 1.4 * smoothstep(0.3, 0.7, n1), detail);
   // ... and the whole disc is mottled with star clouds a few hundred parsecs across
-  let discE = disc * mix(1.0, arm * knot, p.armC * inner) * clumps * mix(1.0, clamp(0.2 + 1.6 * nf, 0.25, 1.9), detail);
+  let discE = disc * mix(1.0, arm * knot, p.armC * inner) * clumps * mix(1.0, clamp(0.2 + 0.9 * nf + 0.7 * nc, 0.2, 2.2), detail);
   let fy = clamp(c4 * p.armC * inner * 0.95 + p.clump * 0.45 - 0.1, 0.0, 1.0);
   var col = OLD * bul + discE * mix(OLD * 0.95, YOUNG, fy);
   col += HII * disc * smoothstep(0.62, 0.8, n2) * arm * inner * (p.armC + p.clump * 0.6) * 1.5 * detail;
@@ -98,8 +100,8 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32, t: f32, foot: f32) -> vec4f 
   // dust: a thin, patchy layer. Its mid-plane wanders and its density comes in clouds, so that seen edge-on (or from
   // inside) the lane breaks up into rifts and windows instead of one ruled line.
   let zd = abs(q.z + (n1 - 0.5) * p.hz * 1.3 * detail);
-  let cloud = mix(1.0, 4.4 * smoothstep(0.42, 0.7, nf), detail);
-  let dust = (1.0 - p.fb) * exp(-r / (p.h * 1.5) - zd / (p.hz * 0.5)) * (0.2 + 2.4 * cd * cd * cd * cd * inner * p.armC + p.clump) * cloud * (1.0 - smoothstep(1.0, 1.5, r));
+  let cloud = mix(1.0, 5.0 * smoothstep(0.46, 0.64, nf * 0.45 + nc * 0.55), detail);
+  let dust = (1.0 - p.fb) * exp(-r / (p.h * 1.5) - zd / (p.hz * 0.7)) * (0.2 + 2.4 * cd * cd * cd * cd * inner * p.armC + p.clump) * cloud * (1.0 - smoothstep(1.0, 1.5, r));
   return vec4f(col, dust);
 }
 `;
@@ -147,7 +149,8 @@ fn bvColour(bv: f32) -> vec3f {
   let v = V.v[F.host];
   let P = galParams(v.id.x, v.flat, v.id.y);
   let w = rel - v.c;
-  let e = galEmit(vec3f(dot(w, v.ax), dot(w, v.ay), dot(w, v.n)) / v.R, P, 0.0, 0.0, 0.0, 1.0);
+  let qf = vec3f(dot(w, v.ax), dot(w, v.ay), dot(w, v.n)) / v.R;
+  let e = galEmit(qf, qf, P, 0.0, 0.0, 0.0, 1.0);
   let rho = dot(e.rgb, vec3f(0.33)) * v.lum / v.R / 0.02296;
   if (u2.x >= F.expect * rho) { return o; }
   var absmag = F.mag + (u2.y - 0.5) * 3.0;
@@ -264,7 +267,7 @@ struct VO {
       let q = vec3f(dot(hit, ax), dot(hit, ay), 0.0);
       var Ps = P; Ps.armC *= smoothstep(10.0, 60.0, i.prm.w);
       // fine structure comes in gradually with size, so a small galaxy is a smooth smudge and never a few noise cells
-      let v = galEmit(q, Ps, f32(i.id.y & 1023u), smoothstep(45.0, 220.0, i.prm.w), 10.0, 1.0 / (i.prm.w * G.pxScale));
+      let v = galEmit(q, q, Ps, f32(i.id.y & 1023u), smoothstep(45.0, 220.0, i.prm.w), 10.0, 1.0 / (i.prm.w * G.pxScale));
       // the bulge's share of v, exactly as galEmit adds it (outer cut included: without it the difference goes
       // negative past r = 1 and the disc ends in a hard edge)
       let rq = dot(q.xy, q.xy);
@@ -305,6 +308,7 @@ fn ign(p: vec2f) -> f32 { return 0.25 + 0.5 * fract(52.9829189 * fract(dot(p, ve
     let sq = sqrt(disc);
     var t0 = max(-b - sq, 0.0); var t1 = -b + sq;
     if (t1 <= t0) { continue; }
+    let tSph = t1;
     let P = galParams(v.id.x, v.flat, v.id.y);
     let ro = vec3f(dot(oc, v.ax), dot(oc, v.ay), dot(oc, v.n));
     let rd = vec3f(dot(d, v.ax), dot(d, v.ay), dot(d, v.n));
@@ -317,17 +321,25 @@ fn ign(p: vec2f) -> f32 { return 0.25 + 0.5 * fract(52.9829189 * fract(dot(p, ve
       } else if (abs(ro.z) > zs) { continue; }
       if (t1 <= t0) { continue; }
     }
-    // inside the sphere the samples crowd toward the camera, where the structure is resolved best
-    let pw = select(1.0, 2.0, t0 <= 0.0);
+    // From inside the disc the samples sit on spheres around the camera, crowded toward it: the same distances in
+    // every direction, so each one shows the clouds at that distance as they are. (Spacing them along each ray's own
+    // path through the slab would put them on planes parallel to the disc, which seen edge-on are ruled streaks.)
+    let within = t0 <= 0.0;
     let N = V.steps;
     var acc = vec3f(0.0); var tr = 1.0; var prev = t0;
     let sd = f32(v.id.y & 1023u);
     for (var s = 0.0; s < N; s += 1.0) {
-      let u1 = pow((s + 1.0) / N, pw);
-      let um = pow((s + jit) / N, pw);
-      let tn = t0 + (t1 - t0) * u1; let t = t0 + (t1 - t0) * um; let dt = tn - prev; prev = tn;
-      // no fine structure right around the camera: there it would be a few huge blotches across the whole sky
-      var e = galEmit(ro + rd * t, P, sd, 1.0, t, t * V.pix);
+      var t: f32; var ts: f32; var dt: f32;
+      if (within) {
+        let x0 = s / N; let x1 = (s + 1.0) / N;
+        let e0 = tSph * x0 * x0 * x0; let e1 = min(tSph * x1 * x1 * x1, t1);
+        if (e1 <= e0) { break; }
+        dt = e1 - e0; t = e0 + dt * jit; ts = e0 + dt * 0.5;
+      } else {
+        let tn = t0 + (t1 - t0) * (s + 1.0) / N; t = t0 + (t1 - t0) * (s + jit) / N; dt = tn - prev; prev = tn;
+        ts = t0 + (t1 - t0) * (s + 0.5) / N;
+      }
+      var e = galEmit(ro + rd * t, ro + rd * ts, P, sd, 1.0, ts, ts * V.pix);
       // the camera's own neighbourhood is left to individual stars (catalogued or fill): the model supplies only
       // the light from farther off, which keeps the sky dark away from the plane
       e = vec4f(e.rgb * smoothstep(0.0, 0.05, t), e.a);

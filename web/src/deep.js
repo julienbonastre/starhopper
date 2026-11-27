@@ -41,8 +41,8 @@ fn vnoise(p: vec3f) -> f32 {
 }
 // per-pixel offset along the ray: plain white noise (no lattice to show through), smoothed away by the wide blit
 fn ign(p: vec2f) -> f32 { var q = fract(vec3f(p.xyx) * vec3f(0.1031, 0.1030, 0.0973)); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
-const HA = vec3f(1.0, 0.16, 0.26);        // hydrogen alpha with a little H beta: the pink of emission nebulae
-const O3 = vec3f(0.25, 0.95, 0.80);       // doubly ionised oxygen: teal
+const HA = vec3f(1.0, 0.045, 0.13);        // hydrogen alpha with a little H beta: the pink of emission nebulae
+const O3 = vec3f(0.12, 0.95, 0.70);       // doubly ionised oxygen: teal
 const DUSTBLUE = vec3f(0.36, 0.56, 1.0);  // starlight scattered by dust
 const OLDSTAR = vec3f(1.0, 0.84, 0.62);
 const YOUNGSTAR = vec3f(0.72, 0.82, 1.0);
@@ -64,11 +64,11 @@ const YOUNGSTAR = vec3f(0.72, 0.82, 1.0);
       let h = sqrt(1.0 - p2);
       let t0 = max(b - h, 0.0); let t1 = b + h;
       if (t1 > t0) {
-        const N = 18.0;
+        let gas = kind == 2.0 || kind == 4.0 || kind == 5.0 || kind == 7.0;
+        let N = select(18.0, 26.0, gas);
         let jit = ign(i.pos.xy);
         var acc = vec3f(0.0); var tr = 1.0;
         let dt = (t1 - t0) / N;
-        let gas = kind == 2.0 || kind == 4.0 || kind == 5.0;
         for (var s = 0.0; s < N; s += 1.0) {
           let tc = t0 + (s + jit) * dt;
           let q = d * tc - c;                                         // sample point, in radii from the centre
@@ -92,27 +92,43 @@ const YOUNGSTAR = vec3f(0.72, 0.82, 1.0);
             let sh = exp(-(r - 0.8) * (r - 0.8) / 0.012);
             let fil = pow(1.0 - abs(2.0 * n2 - 1.0), 6.0);
             em = mix(HA, O3, n1) * (1.0 / 0.22) * sh * fil + vec3f(0.5, 0.6, 1.0) * 0.25 * exp(-r * r / 0.05);
+          } else if (gas) {
+            // emission nebula: a cavity blown into a molecular cloud by the stars in its middle. Thin ionised gas
+            // glows in the cavity in filaments; where the dense cloud begins there is a bright ionisation front,
+            // and behind the front the cloud is dark and opaque, so its bays, pillars and globules have crisp edges.
+            let wv = vec2f(vnoise(q * 1.05 + sd * 0.7), vnoise(q.zxy * 1.05 + sd * 0.7 + 23.0));
+            let rr = r * (0.55 + 1.0 * wv.x);
+            let a1 = (q + vec3f(wv.x - 0.5, wv.y - 0.5, 0.5 - wv.x) * 0.6) * 2.3 + sd; let m1 = vnoise(a1);
+            let a2 = vec3f(a1.y * 0.8 + a1.z * 0.6, a1.z * 0.8 - a1.x * 0.6, a1.x) * 2.3 + 11.3; let m2 = vnoise(a2);
+            let a3 = vec3f(a2.z * 0.6 - a2.x * 0.8, a2.y, a2.z * 0.8 + a2.x * 0.6) * 2.3 + 3.7; let m3 = vnoise(a3);
+            // the finest octave only where a pixel can hold it
+            let fine = 1.0 - smoothstep(0.12, 0.4, 28.0 * tc * 4.8 / (G.focal * G.viewport.y));
+            let m4 = mix(0.5, vnoise(a3.yzx * 2.3 + 7.1), fine);
+            let f = m1 * 0.5 + m2 * 0.27 + m3 * 0.15 + m4 * 0.08;
+            let thr = 0.5 + 0.09 * exp(-rr * rr / 0.05);
+            let dense = smoothstep(thr, thr + 0.035, f);
+            let front = exp(-(f - thr) * (f - thr) / 0.0008);
+            let fil = pow(1.0 - abs(2.0 * (m2 * 0.5 + m3 * 0.3 + m4 * 0.2) - 1.0), 6.0);
+            let env = exp(-rr * rr / 0.42);
+            let irr = 1.0 / (0.03 + rr * rr);
+            dust = dense * 14.0 * exp(-rr * rr / 0.5) * smoothstep(0.05, 0.3, tc);
+            let hot = mix(vec3f(0.5, 1.0, 0.8), vec3f(1.0, 0.07, 0.16), smoothstep(0.04, 0.36, rr));
+            let cool = mix(mix(vec3f(0.3, 0.7, 1.0), HA, smoothstep(0.0, 0.3, rr)), vec3f(1.0, 0.012, 0.03), smoothstep(0.25, 0.85, rr));
+            // starlight scattered blue by the dust just behind the front
+            let veil = smoothstep(thr, thr + 0.05, f) * (1.0 - smoothstep(thr + 0.05, thr + 0.13, f));
+            em = (cool * (1.0 - dense) * (0.04 + fil) * 0.3 + hot * front * 1.2 + DUSTBLUE * veil * 0.1)
+              * env * irr * 4.0 * smoothstep(0.0, 0.2, tc);
           } else {
-            // gas and dust clouds. A slow warp of the radius gives lobes and bays instead of a round outline; three
-            // octaves of noise give billows, bright rims where they fold, and dark lanes that really absorb.
+            // dust clouds lit by starlight. A slow warp of the radius gives lobes and bays instead of a round outline
             let n3 = vnoise(vec3f(w2.z * 0.6 - w2.x * 0.8, w2.y, w2.z * 0.8 + w2.x * 0.6) * 2.9 + 3.7);
             let rr = r * (0.6 + 0.95 * vnoise(q * 1.25 + sd * 0.7));
             let f = n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
             let cloud = smoothstep(0.4, 0.62, f);
-            let rim = pow(1.0 - abs(2.0 * (n2 * 0.6 + n3 * 0.4) - 1.0), 5.0);
             let body = exp(-rr * rr / 0.13);
-            dust = body * smoothstep(0.48, 0.68, vnoise(w1 * 1.7 + 5.0) * 0.6 + n3 * 0.4) * 22.0;
-            if (gas) {
-              // emission: pink hydrogen, turning teal and far brighter toward the stars that light it
-              let core = exp(-rr * rr / 0.022);
-              // (the gas right around the camera is left out: from inside, it is the far walls that are seen)
-              em = (HA * body * cloud * (0.2 + 4.2 * rim) + mix(vec3f(1.0, 0.45, 0.5), vec3f(0.62, 1.0, 0.88), cloud) * 3.2 * core * (0.3 + cloud)) * (1.0 / 0.42) * smoothstep(0.0, 0.4, tc);
-            } else {
-              // reflection: blue starlight on dust, in fine combed wisps
-              let wisp = pow(1.0 - abs(2.0 * vnoise(vec3f(w2.x * 3.5, w2.y * 0.9, w2.z * 0.9)) - 1.0), 3.0);
-              em = mix(DUSTBLUE, vec3f(0.62, 0.76, 1.0), cloud) * body * (0.04 + 1.3 * cloud * (0.35 + wisp)) * (1.0 / 1.6);
-              dust *= 0.4;
-            }
+            dust = body * smoothstep(0.48, 0.68, vnoise(w1 * 1.7 + 5.0) * 0.6 + n3 * 0.4) * 22.0 * 0.4;
+            // reflection: blue starlight on dust, in fine combed wisps
+            let wisp = pow(1.0 - abs(2.0 * vnoise(vec3f(w2.x * 3.5, w2.y * 0.9, w2.z * 0.9)) - 1.0), 3.0);
+            em = mix(DUSTBLUE, vec3f(0.62, 0.76, 1.0), cloud) * body * (0.04 + 1.3 * cloud * (0.35 + wisp)) * (1.0 / 1.6);
           }
           let a = exp(-dust * dt);
           acc += tr * em * edge * (1.0 + a) * 0.5;

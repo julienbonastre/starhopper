@@ -70,12 +70,12 @@ On a MacBook Pro (M5 Pro, 20 GPU cores), Chrome 158, macOS 26.7, High detail, 30
 
 | | average | 99th percentile | maximum |
 |---|---|---|---|
-| Frame interval | 8.33 ms | 10.2 ms | 10.4 ms |
-| GPU time per frame | 4.85 ms | 6.01 ms | 19.01 ms |
+| Frame interval | 8.33 ms | 10.3 ms | 10.4 ms |
+| GPU time per frame | 4.81 ms | 6.35 ms | 9.75 ms |
 
 - No frame was presented late (0 of 10,849).
-- One GPU sample of 10,336 exceeded 8.3 ms. It recurs at the instant the last leg starts and never delays a frame; its cause is not yet found.
-- JS heap at the end of the run: 34 MB.
+- One GPU sample of 9,553 exceeded 8.3 ms. It recurs at the instant the last leg starts and never delays a frame; its cause is not yet found.
+- JS heap at the end of the run: 37 MB.
 
 Sizes:
 
@@ -86,7 +86,7 @@ Sizes:
 ## Not done, or not verified
 
 - **Phones**: the touch controls, landscape lock, detail levels and Save-Data handling are written but have not been run on a phone. The Galaxy S23 Ultra performance target is unmeasured.
-- **Visual review**: three rounds with an independent critic that sees only the renders took the verdict from "blocker" to "major", not to the brief's "nothing above minor". Nothing reads as broken and nothing pops between frames. Still judged major after round three: the Milky Way's band from inside reads as soft parallel streaks rather than star clouds and rifts; the inside of the Orion nebula is foggy; the cosmic web reads as a field of dots; the Milky Way from above is too smooth and shows no bar; Earth's clouds are soft up close. Round three's cheaper findings (a hatch pattern in the nebula, blocky small galaxies, an over-bright reflection nebula, bokeh-like galaxy points) were fixed afterwards and have not been re-reviewed.
+- **Visual review**: three rounds with an independent critic that sees only the renders took the verdict from "blocker" to "major", not to the brief's "nothing above minor". Nothing reads as broken and nothing pops between frames. Since round three the emission nebulae have been remodelled (a cavity with ionisation fronts, filaments and opaque dust in place of fog) and the Milky Way's band from inside is sampled on spheres around the camera, which removed its parallel streaks; neither has been re-reviewed. Still open from round three: the cosmic web reads as a field of dots; the Milky Way from above is too smooth and shows no bar; Earth's clouds are soft up close.
 - **Redshift distances** stretch galaxy clusters along the line of sight from Earth ("fingers of God"). This is in the data and is left as it is.
 - **M32** sits 280 kpc from Andromeda because the Local Volume catalogue lists it at 0.49 Mpc.
 - **Live-database snapshots**: the NASA Exoplanet Archive and SIMBAD have no versioned releases, so the exact query results fetched on 2026-11-27 are kept in `pipeline/snapshots` (0.6 MB) and checked against their checksums like every other source. The build does not query either database; `pipeline/lib.mjs` says how to refresh them.
