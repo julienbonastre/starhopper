@@ -28,7 +28,7 @@ fn starColour(bv: f32) -> vec3f {
 }
 
 const PEAK = 1.2;     // brighter stars grow instead of exceeding this centre value
-const CORE = 6.5;     // ... up to this sigma in CSS pixels
+const CORE = 3.2;     // ... up to this sigma in CSS pixels
 @vertex fn vs(@builtin(vertex_index) vi: u32, @location(0) s: vec4u) -> VO {
   var o: VO;
   let corner = vec2f(f32(vi & 1u) * 2.0 - 1.0, f32(vi >> 1u) * 2.0 - 1.0);
@@ -51,7 +51,7 @@ const CORE = 6.5;     // ... up to this sigma in CSS pixels
   // the sprite only needs to reach where its Gaussian has faded from sight: most stars are faint, and a snug quad
   // for them saves most of the fill
   let snug = clamp(sqrt(2.0 * log(max(peak / 0.0008, 1.2))), 0.9, 3.6);
-  let reach = sigma * min(snug + 1.3 * over * glare, 18.0);
+  let reach = sigma * min(snug + 2.6 * over * glare, 40.0);
   let p = project(rel);
   if (peak < 0.0035 || p.z > 1.0) { o.pos = vec4f(0.0, 0.0, 2.0, 1.0); return o; }
   let half = reach + 1.0;
@@ -64,7 +64,7 @@ const CORE = 6.5;     // ... up to this sigma in CSS pixels
     let k = fract((hsh.x + hsh.y) * hsh.z);
     o.col = mix(vec3f(1.0, 0.80, 0.58), vec3f(0.66, 0.80, 1.0), k * k);
   }
-  o.prm = vec4f(peak, sigma, reach / sigma, min(0.03 * over, 0.35) * glare);
+  o.prm = vec4f(peak, sigma, reach / sigma, min(0.045 * over, 0.7) * glare);
   return o;
 }
 @fragment fn fs(i: VO) -> @location(0) vec4f {
@@ -72,7 +72,7 @@ const CORE = 6.5;     // ... up to this sigma in CSS pixels
   let core = exp(-0.5 * r2);
   // glare: falls off as a power law and reaches zero at the edge of the sprite
   let q = clamp(1.0 - r2 / (i.prm.z * i.prm.z), 0.0, 1.0);
-  let halo = i.prm.w / (1.0 + r2 * 0.35) * q * q;
+  let halo = i.prm.w / (1.0 + r2 * 0.5 + r2 * r2 * 0.004) * q * q;
   // faint wide skirt on bright stars, fading to zero at the quad edge
   let skirt = 0.035 / (1.0 + r2 * r2 * 0.08) * max(0.0, 1.0 - r2 / 12.96) * smoothstep(1.2, 3.0, i.prm.y / G.pxScale);
   return vec4f(i.col * i.prm.x * (core + skirt) + vec3f(1.0, 0.98, 0.95) * halo, 1.0);
