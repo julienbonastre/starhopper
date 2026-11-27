@@ -78,3 +78,18 @@ test('galaxies: the Milky Way, Andromeda and Virgo', () => {
 test('every source is pinned by checksum', () => {
   for (const s of json('manifest.json').sources) assert.match(s.sha256, /^[0-9a-f]{64}$/, s.title);
 });
+
+test('the sky from Earth matches the real constellations', () => {
+  // each figure passes through its best-known stars, and those stars are where the sky has them (seen from the Sun,
+  // which is the Earth's sky to within the stars' parallaxes)
+  const cons = json('constellations.json'), by = (abbr) => cons.find((c) => c.abbr === abbr);
+  const through = (abbr, name) => { const c = by(abbr), s = star(name); assert.ok(c && s, `${abbr} and ${name} exist`); let hit = false; for (let k = 0; k < c.pts.length; k += 3) if (Math.hypot(c.pts[k] - s[2], c.pts[k + 1] - s[3], c.pts[k + 2] - s[4]) < 1e-3) hit = true; assert.ok(hit, `${abbr} is drawn through ${name}`); };
+  for (const [abbr, name] of [['Ori', 'Rigel'], ['Ori', 'Bellatrix'], ['UMa', 'Dubhe'], ['UMa', 'Alkaid'], ['Cru', 'Acrux'], ['Sco', 'Antares'], ['Cyg', 'Deneb'], ['Lyr', 'Vega'], ['CMa', 'Sirius'], ['Leo', 'Regulus'], ['Tau', 'Aldebaran'], ['Cas', 'Schedar']]) through(abbr, name);
+  // angles between stars, as seen from the origin, against their true separations on the sky (degrees)
+  const sep = (a, b) => { const p = star(a).slice(2, 5), q = star(b).slice(2, 5); return Math.acos((p[0] * q[0] + p[1] * q[1] + p[2] * q[2]) / (Math.hypot(...p) * Math.hypot(...q))) / D; };
+  for (const [a, b, deg] of [['Betelgeuse', 'Rigel', 18.6], ['Dubhe', 'Merak', 5.37], ['Sirius', 'Procyon', 25.7], ['Vega', 'Altair', 34.2], ['Castor', 'Pollux', 4.5]]) assert.ok(Math.abs(sep(a, b) - deg) < 0.15, `${a} to ${b}: ${sep(a, b).toFixed(2)} degrees, expected ${deg}`);
+  // the constellation labels sit at the mean direction of the figure: Orion's is near RA 5.5 h on the equator
+  const o = by('Ori'); let m = [0, 0, 0];
+  for (let k = 0; k < o.pts.length; k += 3) { const n = Math.hypot(o.pts[k], o.pts[k + 1], o.pts[k + 2]); m = m.map((v, a) => v + o.pts[k + a] / n); }
+  check(m.map((v) => v * 100), 83, 3, Math.hypot(...m) * 100, 8, 1e-9, 'centre of Orion');
+});

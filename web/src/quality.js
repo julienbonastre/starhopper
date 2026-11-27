@@ -4,7 +4,8 @@ const mob = matchMedia('(pointer:coarse)').matches, mem = navigator.deviceMemory
 export const keep = (k, v) => { try { localStorage[k] = v; } catch {} };
 let saved = '', bad;
 try { saved = localStorage.starhopper || ''; bad = localStorage.starhopperLoad; } catch {}
-let lv = saved !== '' ? +saved : mob ? (mem > 7 ? 1 : 2) : mem <= 4 ? 2 : 0;
+// first visit: by device class and memory; a visitor who asked their browser to save data starts on Low
+let lv = saved !== '' ? +saved : navigator.connection?.saveData ? 2 : mob ? (mem > 7 ? 1 : 2) : mem <= 4 ? 2 : 0;
 if (bad && lv < 2) keep('starhopper', ++lv);
 const q = new URLSearchParams(location.search).get('q');
 if (q !== null && q !== '') lv = Math.max(0, Math.min(2, +q || 0));
