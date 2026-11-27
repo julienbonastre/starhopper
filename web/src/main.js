@@ -246,7 +246,8 @@ async function main() {
     deep = dp; markers = initMarkers(gpu, globalsBuf, exo.hosts);
     for (let i = 0; i < deep.count; i++) if (deep.labelled(i)) labels.add(deep.name(i), 'deep', deep.pos(i, 0), deep.pos(i, 1), deep.pos(i, 2), deep.absmag(i) + 2, Infinity, deep.radius(i) * 1.2, 0, deep.radius(i));
     for (let i = 0; i < deep.count; i++) index.push([deep.name(i).toLowerCase(), deep.name(i), deep.pos(i, 0), deep.pos(i, 1), deep.pos(i, 2), deep.radius(i) * 2.6, deep.absmag(i), 3, deep.radius(i)]);
-    for (const h of exo.hosts) index.push([h[0].toLowerCase(), h[0] + (h[4] > 1 ? ', ' + h[4] + ' planets' : ', 1 planet'), h[1], h[2], h[3], 0.0004, 30, 0, 0]);
+    // (a few hosts are filed under another name than their planets carry, Kepler-90 under KOI-351: both are searchable)
+    for (const h of exo.hosts) for (const n of [h[0], ...(h[5] ? h[5].split(',') : [])]) index.push([n.trim().toLowerCase(), n.trim() + (h[4] > 1 ? ', ' + h[4] + ' planets' : ', 1 planet'), h[1], h[2], h[3], 0.0004, 30, 0, 0]);
     // "Inside the Orion nebula" goes where the catalogue puts it: a little in from the near edge, looking through the heart
     { const i = deep.find('Great Orion Nebula'); if (i >= 0) { const c = [deep.pos(i, 0), deep.pos(i, 1), deep.pos(i, 2)], n = Math.hypot(...c), k = 1 - deep.radius(i) * 0.55 / n; place(3, { p: [c[0] * k, c[1] * k, c[2] * k], at: c, up: [0, 0, 1] }); } }
   });
