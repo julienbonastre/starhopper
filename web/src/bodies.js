@@ -5,7 +5,7 @@
 // the CPU, so the shader's arithmetic stays exact from low orbit out to the edge of the system.
 import { GLOBALS, HDR } from './gpu.js';
 import { cam, PC_AU } from './camera.js';
-import { SUN, PLANETS, MOON, planetPos, moonPos, earthRotation } from './solar.js';
+import { SUN, PLANETS, MOON, planetPos, moonPos, bodyFrame } from './solar.js';
 
 const KM_PC = 1 / 3.0856775814913673e13;
 // geometric albedos (visual): how much sunlight each planet sends back at full phase
@@ -26,9 +26,10 @@ struct VO {
   @builtin(position) pos: vec4f, @location(0) uv: vec2f,
   @location(1) @interpolate(flat) c: vec4f,        // centre in body radii (camera at the origin), kind
   @location(2) @interpolate(flat) col: vec4f,      // colour, radius in device pixels
-  @location(3) @interpolate(flat) sun: vec4f,      // unit vector to the Sun, spin angle
-  @location(4) @interpolate(flat) ring: vec4f,     // ring pole, inner radius (body radii); outer in psf.z
+  @location(3) @interpolate(flat) sun: vec4f,      // unit vector to the Sun, prime meridian angle
+  @location(4) @interpolate(flat) ring: vec4f,     // north pole, ring inner radius (body radii); outer in psf.z
   @location(5) @interpolate(flat) psf: vec4f,      // point tier: peak, sigma; ring outer radius; sphere weight
+  @location(6) @interpolate(flat) mapped: f32,     // 1 once the body's map has arrived
 }
 @vertex fn vs(@builtin(vertex_index) vi: u32, @location(0) c: vec4f, @location(1) col: vec4f, @location(2) sun: vec4f, @location(3) ring: vec4f, @location(4) ex: vec4f) -> VO {
   var o: VO;
@@ -43,7 +44,7 @@ struct VO {
   let w = smoothstep(0.7, 2.0, rpx);
   let peak = min(e / (6.2831853 * sigma * sigma), 40.0) * (1.0 - w);
   let p = project(c.xyz);
-  o.c = c; o.col = vec4f(col.rgb, rpx); o.sun = sun; o.ring = ring; o.psf = vec4f(peak, sigma, ex.y, w);
+  o.c = c; o.col = vec4f(col.rgb, rpx); o.sun = sun; o.ring = ring; o.psf = vec4f(peak, sigma, ex.y, w); o.mapped = ex.z;
   if ((peak < 0.0035 && w <= 0.0) || (p.z > 1.0 && sinA < 0.2)) { o.pos = vec4f(0.0, 0.0, 2.0, 1.0); return o; }
   if (sinA > 0.2) { o.pos = vec4f(corner, 0.5, 1.0); o.uv = corner * G.viewport; return o; }   // looming: cover the view
   // room for the limb glow or rings, and for the stretch of a sphere's outline toward the edge of a wide view
@@ -75,24 +76,29 @@ fn hash1(x: f32) -> f32 { return fract(sin(x * 127.1) * 43758.5453); }
       let n = -p - d * h;                            // surface normal at the near hit
       let mu = max(dot(n, -d), 0.0);
       let lit = dot(n, l);
+      // into the body's own turning frame (north pole, prime meridian), then longitude and latitude on its map
+      let pole = i.ring.xyz;
+      let ex = normalize(select(vec3f(-pole.y, pole.x, 0.0), vec3f(0.0, 1.0, 0.0), abs(pole.z) > 0.99999));
+      let ey = cross(pole, ex);
+      let cs = cos(i.sun.w); let sn = sin(i.sun.w);
+      let nx = dot(n, ex); let ny = dot(n, ey);
+      let e = vec3f(nx * cs + ny * sn, ny * cs - nx * sn, dot(n, pole));
+      let uv = vec2f(fract(atan2(e.y, e.x) / 6.2831853 + 0.5), 0.5 - asin(clamp(e.z, -1.0, 1.0)) / 3.1415927);
+      // the wrap in longitude would make the derivative jump: give the gradients explicitly from the pixel size
+      let px = 1.0 / max(i.col.a * 3.14159, 1.0);
+      let t = textureSampleGrad(earthTex, earthSmp, uv, vec2f(px * 0.5, 0.0), vec2f(0.0, px)).rgb;
+      // the maps run out of detail up close: a little grain keeps them from looking smeared
+      let near = smoothstep(120.0, 900.0, i.col.a);
       if (kind == 2.0) {
         // the Sun: limb-darkened and far above white, so the bloom gives it its glare
         body = i.col.rgb * (0.4 + 0.6 * mu) * mix(vec3f(1.0, 0.55, 0.25), vec3f(1.0), mu) * 14.0;
       } else if (kind == 1.0) {
-        // into the Earth's own turning frame (prime meridian on +x), then longitude and latitude
-        let cs = cos(i.sun.w); let sn = sin(i.sun.w);
-        let e = vec3f(n.x * cs + n.y * sn, n.y * cs - n.x * sn, n.z);
-        let uv = vec2f(fract(atan2(e.y, e.x) / 6.2831853 + 0.5), 0.5 - asin(clamp(e.z, -1.0, 1.0)) / 3.1415927);
-        // the wrap in longitude would make the derivative jump: give the gradients explicitly from the pixel size
-        let px = 1.0 / max(i.col.a * 3.14159, 1.0);
-        let t = textureSampleGrad(earthTex, earthSmp, uv, vec2f(px * 0.5, 0.0), vec2f(0.0, px)).rgb;
         // Weather: the Blue Marble is a cloud-free mosaic, so the clouds are a model. Fractal noise on the sphere,
         // swirled, and thickest along the equator and the two storm belts.
         var cp = e * 2.6; cp += (vec3f(vnoise(cp * 0.9 + 4.0), vnoise(cp.yzx * 0.9 + 9.0), vnoise(cp.zxy * 0.9)) - 0.5) * 1.6;
         let cf = vnoise(cp) * 0.36 + vnoise(cp * 2.3 + 7.1) * 0.28 + vnoise(cp * 5.3 + 2.9) * 0.21 + (vnoise(cp * 12.1 + 5.5) * 0.15 - 0.075) * smoothstep(8.0, 60.0, i.col.a) + 0.075;
         let belt = 0.05 * cos(e.z * 10.5) - 0.07 * smoothstep(0.1, 0.45, abs(abs(e.z) - 0.42)) + 0.05;
         // fine structure once the clouds are close enough to show it
-        let near = smoothstep(120.0, 900.0, i.col.a);
         let fine = (vnoise(cp * 27.0 + 1.7) - 0.5) * 0.10 + (vnoise(cp * 61.0 + 8.3) - 0.5) * 0.07;
         let cover = smoothstep(0.55, 0.66, cf + belt + fine * near) * 0.92;
         // the same field a little way toward the Sun: where it is cloudy there, this ground is in shadow
@@ -106,20 +112,32 @@ fn hash1(x: f32) -> f32 { return fract(sin(x * 127.1) * 43758.5453); }
         let air = pow(1.0 - mu, 4.0);
         let sky = mix(vec3f(0.25, 0.48, 1.0), vec3f(1.0, 0.45, 0.2), smoothstep(0.25, -0.05, lit) * smoothstep(-0.2, 0.0, lit));
         // the map runs out of detail up close: a little grain in the land keeps it from looking smeared
-        let grain = 1.0 + (vnoise(e * 310.0) - 0.5) * 0.22 * near * (1.0 - water);
-        let ground = mix(t * 1.12 * grain * (1.0 - 0.45 * shade), vec3f(0.93, 0.95, 1.0) * (0.86 + 0.28 * vnoise(cp * 14.0 + 3.0)), cover);
+        let eg = 1.0 + (vnoise(e * 310.0) - 0.5) * 0.22 * near * (1.0 - water);
+        let ground = mix(t * 1.12 * eg * (1.0 - 0.45 * shade), vec3f(0.93, 0.95, 1.0) * (0.86 + 0.28 * vnoise(cp * 14.0 + 3.0)), cover);
         body = (ground * max(lit, 0.0) + vec3f(1.0, 0.95, 0.85) * glint) * day;
         body = mix(body, sky * max(lit, 0.0) * 0.9, 0.09) + sky * air * 0.55 * smoothstep(-0.12, 0.15, lit);
+      } else if (i.mapped > 0.5) {
+        // a mapped body. The maps are pictures exposed for the page, so each is scaled to its body's brightness.
+        let grain = 1.0 + ((vnoise(e * 310.0) - 0.5) * 0.2 + (vnoise(e * 1270.0) - 0.5) * 0.12) * near;
+        if (kind == 3.0) {
+          // cloud tops: darkening toward the limb, and a soft terminator
+          body = t * 1.9 * smoothstep(-0.06, 0.5, lit) * max(lit, 0.0) * (0.3 + 0.7 * mu);
+        } else if (kind == 4.0) {
+          // airless dust throws light back the way it came: lit almost flat to the limb, as the full Moon is
+          body = t * grain * 0.95 * smoothstep(0.0, 0.07, lit) * (0.35 + 0.65 * max(lit, 0.0) / (max(lit, 0.0) + mu + 0.02) * 2.0) * (0.85 + 0.15 * mu);
+        } else {
+          body = t * grain * 1.7 * max(lit, 0.0) * (0.45 + 0.55 * mu);
+        }
       } else {
         var alb = i.col.rgb;
         if (kind == 3.0) {
-          // gas giants: latitude bands about the spin axis (a stand-in pattern, not a map)
+          // gas giants: latitude bands about the spin axis (a stand-in until the map arrives)
           let lat = dot(n, i.ring.xyz);
           alb *= 1.0 + 0.16 * sin(lat * 23.0 + 2.0 * sin(lat * 7.0)) + 0.08 * sin(lat * 61.0);
         }
         body = alb * 2.4 * max(lit, 0.0) * (0.35 + 0.65 * mu);      // a little limb darkening
         if (kind == 4.0) {
-          // the Moon: dark seas and a rough, cratered look (a stand-in pattern, not a map), lit flat to the limb as
+          // the Moon: dark seas and a rough, cratered look (a stand-in until the map arrives), lit flat to the limb as
           // the full Moon is
           let sea = smoothstep(0.43, 0.57, vnoise(n * 2.3 + 11.0) * 0.6 + vnoise(n * 5.1 + 3.0) * 0.4);
           let rough = (0.86 + 0.28 * vnoise(n * 23.0)) * (0.92 + 0.16 * vnoise(n * 71.0));
@@ -180,7 +198,10 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
   PLANETS.forEach((p, i) => { planetPos(i, jd, tmp); pos.set(tmp, (i + 1) * 3); radius[i + 1] = p.radius * KM_PC; });
   // the Moon, around the Earth
   moonPos(jd, tmp); for (let a = 0; a < 3; a++) pos[LUNA * 3 + a] = pos[EARTH * 3 + a] + tmp[a]; radius[LUNA] = MOON.radius * KM_PC;
-  const spin = earthRotation(jd);
+  // which way each body faces: north pole and prime meridian angle (fixed for the session, like the positions)
+  const frame = new Float64Array(NB * 4); frame[2] = 1;
+  for (let i = 1; i < NB; i++) frame.set(bodyFrame(BODY[i].name, jd, [0, 0, 0, 0]), i * 4);
+  const spin = frame[EARTH * 4 + 3] + Math.PI / 2;                         // Greenwich sidereal angle
   const names = BODY.map((p) => p.name);
 
   const module = device.createShaderModule({ code: SHADER });
@@ -197,31 +218,39 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
     primitive: { topology: 'triangle-strip' },
   });
   const smp = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'repeat', addressModeV: 'clamp-to-edge' });
-  // until the Blue Marble arrives the Earth is a plain blue ball
-  let tex = device.createTexture({ size: [1, 1], format: 'rgba8unorm-srgb', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-  queue.writeTexture({ texture: tex }, new Uint8Array([28, 60, 120, 255]), {}, [1, 1]);
-  const mkBind = () => device.createBindGroup({ layout, entries: [{ binding: 0, resource: { buffer: globalsBuf } }, { binding: 1, resource: tex.createView() }, { binding: 2, resource: smp }, { binding: 3, resource: noise.view }, { binding: 4, resource: noise.sampler }] });
-  let bind = mkBind();
-  fetch(base + 'earth.jpg').then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => createImageBitmap(b, texWidth ? { colorSpaceConversion: 'none', resizeWidth: texWidth, resizeHeight: texWidth / 2, resizeQuality: 'high' } : { colorSpaceConversion: 'none' })).then((img) => {
-    const w = img.width, h = img.height, levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
-    const t = device.createTexture({ size: [w, h], mipLevelCount: levels, format: 'rgba8unorm-srgb', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
-    queue.copyExternalImageToTexture({ source: img }, { texture: t }, [w, h]);
-    // mip chain, so the Earth does not shimmer when it is small
-    const mm = device.createShaderModule({ code: MIP });
-    const mp = device.createRenderPipeline({ layout: 'auto', vertex: { module: mm, entryPoint: 'vs' }, fragment: { module: mm, entryPoint: 'fs', targets: [{ format: 'rgba8unorm-srgb' }] } });
-    const ms = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-    const enc = device.createCommandEncoder();
-    for (let l = 1; l < levels; l++) {
-      const p = enc.beginRenderPass({ colorAttachments: [{ view: t.createView({ baseMipLevel: l, mipLevelCount: 1 }), loadOp: 'clear', storeOp: 'store' }] });
-      p.setPipeline(mp); p.setBindGroup(0, device.createBindGroup({ layout: mp.getBindGroupLayout(0), entries: [{ binding: 0, resource: t.createView({ baseMipLevel: l - 1, mipLevelCount: 1 }) }, { binding: 1, resource: ms }] }));
-      p.draw(3); p.end();
-    }
-    queue.submit([enc.finish()]);
-    const old = tex; tex = t; bind = mkBind(); old.destroy(); img.close();
-  }).catch(() => {});
+  // Every body has a map. Until one arrives (or if it never does) the body is drawn from its stand-in pattern,
+  // the Earth as a plain blue ball. The Earth's comes with the page; the others are fetched on the way to them.
+  const blank = device.createTexture({ size: [1, 1], format: 'rgba8unorm-srgb', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+  queue.writeTexture({ texture: blank }, new Uint8Array([28, 60, 120, 255]), {}, [1, 1]);
+  const mkBind = (tex) => device.createBindGroup({ layout, entries: [{ binding: 0, resource: { buffer: globalsBuf } }, { binding: 1, resource: tex.createView() }, { binding: 2, resource: smp }, { binding: 3, resource: noise.view }, { binding: 4, resource: noise.sampler }] });
+  const blankBind = mkBind(blank);
+  const binds = new Array(NB).fill(blankBind), mapped = new Uint8Array(NB), asked = new Uint8Array(NB);
+  const mm = device.createShaderModule({ code: MIP });
+  const mp = device.createRenderPipeline({ layout: 'auto', vertex: { module: mm, entryPoint: 'vs' }, fragment: { module: mm, entryPoint: 'fs', targets: [{ format: 'rgba8unorm-srgb' }] } });
+  const ms = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+  function loadMap(i) {
+    asked[i] = 1;
+    const url = base + (i === EARTH ? 'earth.jpg' : 'maps/' + BODY[i].name.toLowerCase() + '.jpg');
+    const fit = i === EARTH && texWidth ? { resizeWidth: texWidth, resizeHeight: texWidth / 2, resizeQuality: 'high' } : {};
+    fetch(url).then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => createImageBitmap(b, { colorSpaceConversion: 'none', ...fit })).then((img) => {
+      const w = img.width, h = img.height, levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
+      const t = device.createTexture({ size: [w, h], mipLevelCount: levels, format: 'rgba8unorm-srgb', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
+      queue.copyExternalImageToTexture({ source: img }, { texture: t }, [w, h]);
+      // mip chain, so the body does not shimmer when it is small
+      const enc = device.createCommandEncoder();
+      for (let l = 1; l < levels; l++) {
+        const p = enc.beginRenderPass({ colorAttachments: [{ view: t.createView({ baseMipLevel: l, mipLevelCount: 1 }), loadOp: 'clear', storeOp: 'store' }] });
+        p.setPipeline(mp); p.setBindGroup(0, device.createBindGroup({ layout: mp.getBindGroupLayout(0), entries: [{ binding: 0, resource: t.createView({ baseMipLevel: l - 1, mipLevelCount: 1 }) }, { binding: 1, resource: ms }] }));
+        p.draw(3); p.end();
+      }
+      queue.submit([enc.finish()]);
+      binds[i] = mkBind(t); mapped[i] = 1; img.close();
+    }).catch(() => {});
+  }
+  loadMap(EARTH);
 
   const out = new Float32Array(NB * F), buf = device.createBuffer({ size: out.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
-  const order = new Int32Array(NB), dist = new Float64Array(NB);
+  const order = new Int32Array(NB), dist = new Float64Array(NB), slot = new Int32Array(NB);
   // nearest body: altitude above its surface (pc), for the flight model and the HUD
   const near = { id: -1, alt: Infinity, dist: Infinity };
   let live = 0;
@@ -245,15 +274,15 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
     for (let k = 0; k < NB; k++) {
       const i = order[k], R = radius[i], o = live * F, d = dist[i];
       if (d > 0.02) continue;                                            // beyond a few thousand AU the catalogue Sun is all there is
+      if (i > 0 && !asked[i] && d < R * 1500) loadMap(i);                // about a pixel across: time to fetch its face
       out[o] = (pos[i * 3] - cam.p[0]) / R; out[o + 1] = (pos[i * 3 + 1] - cam.p[1]) / R; out[o + 2] = (pos[i * 3 + 2] - cam.p[2]) / R;
       const P = BODY[i];
       out[o + 3] = i === 0 ? 2 : i === EARTH ? 1 : i >= 5 && i <= 8 ? 3 : i === LUNA ? 4 : 0;
       out[o + 4] = P.color[0]; out[o + 5] = P.color[1]; out[o + 6] = P.color[2]; out[o + 7] = 0;
       const ds = Math.hypot(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]) || 1;
       const lx = -pos[i * 3] / ds, ly = -pos[i * 3 + 1] / ds, lz = -pos[i * 3 + 2] / ds;
-      out[o + 8] = lx; out[o + 9] = ly; out[o + 10] = lz; out[o + 11] = i === EARTH ? spin : 0;
-      const pole = P.ring ? P.ring.pole : null;
-      out[o + 12] = pole ? pole[0] : 0; out[o + 13] = pole ? pole[1] : 0; out[o + 14] = pole ? pole[2] : 1; out[o + 15] = P.ring ? P.ring.inner / P.radius : 0;
+      out[o + 8] = lx; out[o + 9] = ly; out[o + 10] = lz; out[o + 11] = frame[i * 4 + 3];
+      out[o + 12] = frame[i * 4]; out[o + 13] = frame[i * 4 + 1]; out[o + 14] = frame[i * 4 + 2]; out[o + 15] = P.ring ? P.ring.inner / P.radius : 0;
       // reflected sunlight as a point: phase angle between the Sun and the camera, seen from the planet
       let lum = 0;
       if (i > 0) {
@@ -261,7 +290,8 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
         const al = Math.acos(Math.max(-1, Math.min(1, cosA))), phase = (Math.sin(al) + (Math.PI - al) * Math.cos(al)) / Math.PI;
         lum = L_SUN * ALBEDO[i - 1] * (R / ds) * (R / ds) * phase / (d * d);
       }
-      out[o + 16] = lum; out[o + 17] = P.ring ? P.ring.outer / P.radius : 0; out[o + 18] = 0; out[o + 19] = 0;
+      out[o + 16] = lum; out[o + 17] = P.ring ? P.ring.outer / P.radius : 0; out[o + 18] = mapped[i]; out[o + 19] = 0;
+      slot[live] = i;
       live++;
     }
     if (live) queue.writeBuffer(buf, 0, out, 0, live * F);
@@ -275,7 +305,11 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
     const ex = cx - dx * t, ey = cy - dy * t, ez = cz - dz * t;
     return ex * ex + ey * ey + ez * ez < radius[i] * radius[i];
   }
-  function draw(pass) { if (!live) return; pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.setVertexBuffer(0, buf); pass.draw(4, live); }
+  function draw(pass) {
+    if (!live) return;
+    pass.setPipeline(pipeline); pass.setVertexBuffer(0, buf);
+    for (let k = 0; k < live; k++) { pass.setBindGroup(0, binds[slot[k]]); pass.draw(4, 1, 0, k); }
+  }
 
   // Where the flight begins: a few hundred kilometres up over whichever well-known stretch of coast is in the
   // best daylight right now, looking across it to the Earth's limb with the Sun off to one side.

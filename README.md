@@ -8,7 +8,7 @@
 |---|---|
 | ![The Milky Way from above](docs/pose_5.jpg) | ![Approaching Andromeda](docs/pose_6.jpg) |
 
-Rendered with WebGPU and no engine. Everything on screen is either a public catalogue or a documented procedural model; the one image is NASA's Blue Marble on the Earth. The brief it was built from is in [`prompt.txt`](prompt.txt).
+Rendered with WebGPU and no engine. Everything on screen is either a public catalogue or a documented procedural model; the only images are the surface maps of the Earth, the Moon and the planets. The brief it was built from is in [`prompt.txt`](prompt.txt).
 
 ## Flying
 
@@ -36,6 +36,7 @@ Measured, from catalogues pinned by checksum:
 - **Galaxies**: GLADE 2.3 as points out to 268 Mpc; 10,900 OpenNGC and Local Volume galaxies with size, tilt and Hubble type, with distances from the Updated Nearby Galaxy Catalog and Cosmicflows-3 where they exist.
 - **Exoplanet hosts**: NASA Exoplanet Archive, 4,520 stars.
 - **Earth**: NASA Blue Marble Next Generation.
+- **The Moon and the other planets**: Solar System Scope's maps (CC BY 4.0), assembled from NASA mission imagery: MESSENGER for Mercury, Viking for Mars, Cassini for Jupiter and Saturn, Voyager 2 for Uranus and Neptune, the Lunar Reconnaissance Orbiter for the Moon. Venus shows its cloud tops, which is an artist's map. Each body is turned to face the way the IAU's rotation model says it does today, so the Moon shows the Earth its near side; the giants' weather is from the day of the flyby. A map is fetched as you approach its body.
 
 Procedural, and hidden by `P`:
 
@@ -43,7 +44,7 @@ Procedural, and hidden by `P`:
 - The Milky Way's diffuse light and dust, and individual "fill" stars where the catalogue is incomplete.
 - Galaxies beyond the survey limit and behind the plane of the Milky Way: a statistical continuation of the web.
 - The glow of the cosmic web: the survey's galaxies counted into a 128-cell density grid (4 Mpc cells, corrected for the survey thinning with distance) and drawn as faint light, megaparsecs from any galaxy.
-- The Earth's clouds (the Blue Marble is a cloud-free mosaic), Saturn's ring detail and the giants' bands.
+- The Earth's clouds (the Blue Marble is a cloud-free mosaic), Saturn's ring detail, and fine grain on the Moon and rocky planets closer than their maps resolve.
 
 Every source, with its licence and credit, is listed in the app under "Data and credits" and in the generated `data/manifest.json`.
 
@@ -86,10 +87,11 @@ Sizes:
 
 - `index.html` is 101 kB (37 kB gzipped) and holds all the code.
 - Needed before the first frame: the page, the star and galaxy indexes, the detailed galaxies and the first star tile, about 0.9 MB.
-- Streamed afterwards as you fly: star tiles 42 MB in 1,797 files (the view from Earth uses about 14 MB of them), galaxy tiles 5.6 MB, names, nebulae and exoplanet hosts 0.6 MB, the Earth image 2.3 MB, the galaxy density grid 0.8 MB.
+- Streamed afterwards as you fly: star tiles 42 MB in 1,797 files (the view from Earth uses about 14 MB of them), galaxy tiles 5.6 MB, names, nebulae and exoplanet hosts 0.6 MB, the Earth image 2.3 MB, the Moon and planet maps 3.9 MB in 8 files (each fetched on the way to its body), the galaxy density grid 0.8 MB.
 
 ## Not done, or not verified
 
+- **Relief on the Moon and planets**: the maps are colour only. Craters and mountains do not cast shadows at the day/night line; that needs the laser-altimeter elevation maps (LOLA, MOLA), which are not in yet.
 - **Phones**: the touch controls, landscape lock, detail levels and Save-Data handling are written but have not been run on a phone. The Galaxy S23 Ultra performance target is unmeasured.
 - **Visual review**: four rounds with an independent critic that sees only the renders have not reached the brief's "nothing above minor". Round four (after the nebulae were remodelled as cavities with ionisation fronts and the Milky Way's streaks were removed) found one blocker, the Pleiades drawn in red emission, which is fixed: their dust now shines blue by reflection. Its majors that remain open: the Milky Way's band from inside reads as grey smoke without grain; the inside of the Orion nebula is soft with gritty edges; the Milky Way from above is a clean two-arm pinwheel with no bar; Andromeda's inner and outer disc disagree; the Sun at 70 AU is a disc in a halo. The cosmic web has since gained a density glow, not yet re-reviewed. Nothing pops between frames.
 - **Redshift distances** stretch galaxy clusters along the line of sight from Earth ("fingers of God"). This is in the data and is left as it is.
@@ -105,4 +107,4 @@ Inspired by [Abyssal Garden](https://github.com/Noniv/abyssal-garden).
 
 ## License
 
-Code is [MIT](LICENSE). Baked catalogue data carries the licences of its sources (AT-HYG, Stellarium and OpenNGC are CC BY-SA 4.0), listed in the app's credits.
+Code is [MIT](LICENSE). Baked catalogue data carries the licences of its sources (AT-HYG, Stellarium and OpenNGC are CC BY-SA 4.0; the Moon and planet maps are CC BY 4.0), listed in the app's credits.

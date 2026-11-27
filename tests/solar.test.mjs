@@ -1,7 +1,7 @@
 // Checks the planet positions and the Earth's rotation angle against JPL Horizons and textbook values.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MOON, moonPos, PLANETS, SUN, planetPos, orbitPoints, jdNow, earthRotation } from '../web/src/solar.js';
+import { bodyFrame, MOON, moonPos, PLANETS, SUN, planetPos, orbitPoints, jdNow, earthRotation } from '../web/src/solar.js';
 
 const D = Math.PI / 180, AU = 206264.806247, EPS = 23.43928 * D;
 const p = new Float64Array(3);
@@ -114,4 +114,32 @@ test('the Moon is where Meeus puts it on 1992 April 12, and always at a lunar di
   assert.ok(Math.abs(r * KM - 368409.7) < 2500, 'distance ' + r * KM);
   for (let d = 0; d < 400; d += 3) { const k = Math.hypot(...moonPos(2461000 + d, [0, 0, 0])) * KM; assert.ok(k > 354000 && k < 408000, 'distance ' + k); }
   assert.equal(MOON.name, 'Moon');
+});
+
+// longitude and latitude (degrees) of the point on a body that faces along v (from its centre)
+function facing(name, jd, v) {
+  const f = bodyFrame(name, jd, [0, 0, 0, 0]), p = [f[0], f[1], f[2]];
+  let x = Math.abs(p[2]) > 0.99999 ? [0, 1, 0] : [-p[1], p[0], 0]; const xl = Math.hypot(...x); x = x.map((c) => c / xl);
+  const y = [p[1] * x[2] - p[2] * x[1], p[2] * x[0] - p[0] * x[2], p[0] * x[1] - p[1] * x[0]], n = Math.hypot(...v);
+  const dot = (a) => (a[0] * v[0] + a[1] * v[1] + a[2] * v[2]) / n;
+  let lon = (Math.atan2(dot(y), dot(x)) - f[3]) * 180 / Math.PI; lon = ((lon + 540) % 360) - 180;
+  return [lon, Math.asin(dot(p)) * 180 / Math.PI];
+}
+
+test('the Moon keeps its near side to the Earth, and the Earth frame agrees with sidereal time', () => {
+  // the middle of the map's near side stays within the librations (about 8 degrees each way) of the Earth
+  for (let d = 0; d < 9000; d += 7.3) {
+    const jd = 2458000 + d, m = moonPos(jd, [0, 0, 0]), [lon, lat] = facing('Moon', jd, [-m[0], -m[1], -m[2]]);
+    assert.ok(Math.abs(lon) < 9.5 && Math.abs(lat) < 8, `JD ${jd}: sub-Earth point ${lon.toFixed(1)}, ${lat.toFixed(1)}`);
+  }
+  // Greenwich's meridian points along (cos t, sin t, 0)
+  const jd = 2461372.25, t = earthRotation(jd), [lon, lat] = facing('Earth', jd, [Math.cos(t), Math.sin(t), 0]);
+  assert.ok(Math.abs(lon) < 1e-6 && Math.abs(lat) < 1e-6);
+  // Mars: obliquity 25.2 degrees, and one turn per 24 h 37 min 22.7 s
+  const a = new Float64Array(3), b = new Float64Array(3); planetPos(3, 2451545, a); planetPos(3, 2451545 + 200, b);
+  const nrm = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], len = Math.hypot(...nrm), f = bodyFrame('Mars', 2451545, [0, 0, 0, 0]);
+  const tilt = Math.acos((nrm[0] * f[0] + nrm[1] * f[1] + nrm[2] * f[2]) / len) / D;
+  assert.ok(Math.abs(tilt - 25.19) < 0.2, `Mars's obliquity ${tilt.toFixed(2)}`);
+  const w0 = bodyFrame('Mars', 2461000, [0, 0, 0, 0])[3], w1 = bodyFrame('Mars', 2461000 + 88642.6632 / 86400, [0, 0, 0, 0])[3];
+  assert.ok(Math.abs(Math.sin(w1 - w0)) < 1e-4);
 });

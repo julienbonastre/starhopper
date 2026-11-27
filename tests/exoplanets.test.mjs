@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EXO_SOURCES } from '../pipeline/exoplanets.mjs';
 import { EARTH_SOURCES, jpegSize } from '../pipeline/earth.mjs';
+import { MAP_SOURCES } from '../pipeline/maps.mjs';
 
 const data = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data');
 const D = Math.PI / 180;
@@ -50,8 +51,16 @@ test('the Earth map is a 2:1 JPEG copied untouched', () => {
   assert.ok(width === 2 * height && width >= 2048 && width <= 8192, `${width} x ${height}`);
 });
 
+test('every planet and the Moon has a 2:1 map', () => {
+  assert.deepEqual(Object.keys(MAP_SOURCES), ['mercury', 'venus', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'moon']);
+  for (const body of Object.keys(MAP_SOURCES)) {
+    const { width, height } = jpegSize(readFileSync(path.join(data, 'maps', body + '.jpg')));
+    assert.ok(width === 2 * height && width >= 1024 && width <= 4096, `${body}: ${width} x ${height}`);
+  }
+});
+
 test('sources are pinned by checksum', () => {
-  for (const s of [...Object.values(EXO_SOURCES), ...Object.values(EARTH_SOURCES)]) {
+  for (const s of [...Object.values(EXO_SOURCES), ...Object.values(EARTH_SOURCES), ...Object.values(MAP_SOURCES)]) {
     assert.match(s.sha256, /^[0-9a-f]{64}$/, s.title);
     for (const k of ['title', 'url', 'file', 'licence', 'credit', 'home']) assert.ok(s[k], `${s.title}: ${k}`);
   }

@@ -108,6 +108,33 @@ export function moonPos(jd, out) {
   return out;
 }
 
+// Which way each body faces: the IAU's rotation models (Archinal et al. 2018, "Report of the IAU Working Group on
+// Cartographic Coordinates and Rotational Elements: 2015", Celest. Mech. Dyn. Astron. 130, 22; Mars from the 2009
+// report, whose model has no periodic terms to leave out). Per body: right
+// ascension and declination of the north pole, the prime meridian's angle W at J2000 and its rate per day, all in
+// degrees. W is measured eastward along the body's equator from where that equator rises through the Earth's
+// (the direction z x pole). The small periodic terms are left out except the Moon's largest, so a map sits within
+// a few degrees of where it should; the giants turn by cloud-top or radio period (Jupiter: System II), and their
+// weather drifts against either, so only the latitudes of their features mean anything.
+const SPIN = {
+  Mercury: [281.0103, 61.4155, 329.5988, 6.1385108], Venus: [272.76, 67.16, 160.20, -1.4813688],
+  Mars: [317.68143, 52.88650, 176.630, 350.89198226], Jupiter: [268.056595, 64.495303, 43.3, 870.27],
+  Saturn: [40.589, 83.537, 38.90, 810.7939024], Uranus: [257.311, -15.175, 203.81, -501.1600928],
+  Neptune: [299.36, 43.46, 253.18, 536.3128492], Moon: [269.9949, 66.5392, 38.3213, 13.17635815],
+};
+// The frame of a body at jd into out: its north pole (unit vector, this frame) in out[0..2] and W in radians in
+// out[3]. A point at east longitude lon and latitude lat on it is at angle W + lon around the pole from z x pole.
+export function bodyFrame(name, jd, out) {
+  if (name === 'Earth') { out[0] = 0; out[1] = 0; out[2] = 1; out[3] = earthRotation(jd) - Math.PI / 2; return out; }
+  const s = SPIN[name], d = jd - J2000;
+  let ra = s[0], dec = s[1], W = s[2] + s[3] * d;
+  if (name === 'Moon') { const E1 = (125.045 - 0.0529921 * d) * DEG; ra -= 3.8787 * Math.sin(E1); dec += 1.5419 * Math.cos(E1); W += 3.5610 * Math.sin(E1); }
+  const cd = Math.cos(dec * DEG);
+  out[0] = cd * Math.cos(ra * DEG); out[1] = cd * Math.sin(ra * DEG); out[2] = Math.sin(dec * DEG);
+  W %= 360; out[3] = (W < 0 ? W + 360 : W) * DEG;
+  return out;
+}
+
 // Julian date of the system clock (UTC).
 export const jdNow = () => Date.now() / 86400000 + 2440587.5;
 
