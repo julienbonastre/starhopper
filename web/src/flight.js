@@ -110,11 +110,14 @@ export function updateFlight(dt) {
   if (touchX || touchY) { const k = 2 * Math.tan(cam.fov / 2) / innerHeight; rotateLocal(1, touchX * k); rotateLocal(0, touchY * k); touchX = touchY = 0; basis(); }
   // touch thrust: the strip is exponential (a tenth of the usual speed at its dead zone, ten times at the end)
   const th = flight.thr || touchFwd, tz = th ? Math.sign(th) * Math.pow(10, 2 * Math.abs(th) - 1) : 0;
-  const mx = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0), my = (keys.has('KeyR') ? 1 : 0) - (keys.has('KeyF') ? 1 : 0), mz = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) + tz;
-  if (go.on && (mx || my || mz)) cancelGoto();
+  const kz = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0);
+  const mx = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0), my = (keys.has('KeyR') ? 1 : 0) - (keys.has('KeyF') ? 1 : 0), mz = kz + tz;
+  // the keys take the controls back from a fly-to; the touch throttle only sets its pace
+  if (go.on && (mx || my || kz)) cancelGoto();
   if (go.on) {
     // travel along the line with the remaining distance shrinking geometrically, so every scale gets equal time
-    go.t = Math.min(1, go.t + dt / go.dur);
+    // pace: the throttle strip pushed up hurries the flight (up to ten times), pulled down slows it to a standstill
+    go.t = Math.min(1, go.t + dt / go.dur * (th > 0 ? Math.pow(10, th) : 1 + th));
     const turn = go.slow ? go.t : Math.min(1, go.t * 5), s = ease(go.t);
     slerp(_q, go.q0, go.q1, ease(turn)); cam.q.set(_q); basis();
     const d0 = go.d0, d1 = Math.min(go.stop, d0), rem = d0 <= d1 ? d1 : d0 * Math.pow(d1 / d0, s), f = d0 > 0 ? 1 - rem / d0 : 0;

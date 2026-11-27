@@ -2,7 +2,7 @@
 // a breath of filtered noise that opens up with speed, and a faint high shimmer close to things. Over that, music
 // that is composed as it plays and never repeats: slow chords that melt into one another and now and then a few
 // bell notes, in a long reverberation. Its key follows the scale you are at.
-let ctx = null, master, drone = [], droneGain, noiseFilter, noiseGain, shimmer = [], shimmerGain, on = false, volume = 0.7;
+let ctx = null, master, drone = [], droneGain, noiseFilter, noiseGain, shimmer = [], shimmerGain, on = false, volume = 0.7, engine = 1;
 let out, meter, music, nextChord = 0, nextBell = 0, chordI = 0, seed = 7;
 const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
 // chords as semitones above the root, spread wide: I add 9, vi 7, IV maj 7, V sus, iii 7, IV add 9
@@ -86,6 +86,8 @@ export function setSound(want) {
   if (want) { nextChord = Math.max(nextChord, ctx.currentTime + 0.3); nextBell = Math.max(nextBell, ctx.currentTime + 6); }
   return on;
 }
+// how loud the engine is (the drone and the rush of speed) against the music, 0..1
+export function setEngine(v) { engine = v; }
 // 0..1; takes effect at once when the sound is on
 export function setVolume(v) { volume = v; if (ctx && on) master.gain.setTargetAtTime(0.75 * volume, ctx.currentTime, 0.1); }
 // a few times a second: speed as a 0..1 measure of how fast the view is changing, scale 0..4, closeness 0..1
@@ -94,7 +96,8 @@ export function updateSound(speed, scale, close) {
   const t = ctx.currentTime, root = ROOT[Math.max(0, Math.min(4, scale))];
   for (const d of drone) d.o.frequency.setTargetAtTime(root * d.ratio, t, 2.5);
   noiseFilter.frequency.setTargetAtTime(160 + 2200 * speed * speed, t, 0.4);
-  noiseGain.gain.setTargetAtTime(0.02 + 0.22 * speed, t, 0.4);
+  noiseGain.gain.setTargetAtTime((0.02 + 0.22 * speed) * engine, t, 0.4);
+  droneGain.gain.setTargetAtTime(0.09 * engine, t, 0.4);
   shimmerGain.gain.setTargetAtTime(0.012 * close, t, 1.2);
   // the music: the next chord begins as the last one starts to fade; bells come singly or in twos and threes, with
   // silences between

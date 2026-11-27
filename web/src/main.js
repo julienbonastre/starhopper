@@ -14,7 +14,7 @@ import { initDeep } from './deep.js';
 import { initMarkers } from './markers.js';
 import { initBeyond } from './beyond.js';
 import { initWeb } from './web.js';
-import { setSound, setVolume, updateSound, level } from './audio.js';
+import { setSound, setVolume, setEngine, updateSound, level } from './audio.js';
 import { PLANETS, orbitPoints, jdNow } from './solar.js';
 
 const body = document.body, canvas = $('c');
@@ -164,6 +164,9 @@ async function main() {
   try { if (localStorage.starhopperSound === '0') show.sound = false; if (localStorage.starhopperVol) $('volr').value = localStorage.starhopperVol; } catch {}
   syncToggles(); setVolume($('volr').value / 100);
   $('volr').oninput = (e) => { setVolume(e.target.value / 100); keep('starhopperVol', e.target.value); };
+  try { if (localStorage.starhopperEng) $('engr').value = localStorage.starhopperEng; } catch {}
+  setEngine($('engr').value / 100);
+  $('engr').oninput = (e) => { setEngine(e.target.value / 100); keep('starhopperEng', e.target.value); };
   // search: every named star and galaxy; Enter flies to the best match, stopping a comfortable distance short
   // rows: search key, shown name, position, where a fly-to stops, absolute magnitude, kind (0 star, 1 galaxy, 2 planet, 3 nebula or cluster), radius
   const index = [];
@@ -183,11 +186,11 @@ async function main() {
     }
     // nothing there, or the target itself picked again: no target
     if (best >= 0 && target.on && index[best][2] === target.x && index[best][3] === target.y && index[best][4] === target.z) best = -1;
-    if (best < 0) { target.on = false; labels.items[tgtLabel].maxDist = 0; $('htr').hidden = true; return; }
+    if (best < 0) { target.on = false; labels.items[tgtLabel].maxDist = 0; $('htr').hidden = true; $('tb').classList.remove('on'); return; }
     const r = index[best];
     target.on = true; target.x = r[2]; target.y = r[3]; target.z = r[4]; target.stop = r[5]; target.name = r[1];
     labels.move(tgtLabel, '\u25C7 ' + r[1], r[2], r[3], r[4], r[8]); labels.items[tgtLabel].maxDist = Infinity; labelT = 1;
-    $('htr').hidden = false; flash(r[1]);
+    $('htr').hidden = false; $('tb').classList.add('on'); $('tbn').textContent = r[1]; flash(r[1]);
   }
   $('find').addEventListener('keydown', (e) => {
     e.stopPropagation();
@@ -238,6 +241,9 @@ async function main() {
     keep('starhopperSaves', JSON.stringify(saves)); $('svn').value = ''; drawSaves(); $('s').textContent = 'Saved: ' + n;
   };
   $('ctxgo').onclick = () => { $('ctx').hidden = true; flight.menu = false; if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } };
+  // the bar under a target: go there (or stop going there), or let it go
+  $('tbgo').onclick = () => { if (flight.goto) cancelGoto(); else if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } };
+  $('tbx').onclick = () => { cancelGoto(); pick(0, 0, 0); };
   $('ctxno').onclick = () => { $('ctx').hidden = true; flight.menu = false; };
   $('svb').onclick = save;
   $('svn').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') save(); });
@@ -330,7 +336,7 @@ async function main() {
     const gainSB = 1.75 * sm(0.6, 2.0, out) + 1.0 * sm(3, 30, env);
     const gainPt = Math.min(5.6, 4.2 * Math.log10(Math.max(env / 0.7, 1)));
     const n = stars.near;
-    let target = exposureBase * Math.pow(10, 0.4 * gainSB);
+    let aim = exposureBase * Math.pow(10, 0.4 * gainSB);
     if (n.dist < 1e6) {
       const dx = n.x - cam.p[0], dy = n.y - cam.p[1], dz = n.z - cam.p[2], d = Math.max(n.dist, 1e-12);
       const cosA = (dx * cam.fwd[0] + dy * cam.fwd[1] + dz * cam.fwd[2]) / d;
@@ -338,10 +344,10 @@ async function main() {
       const e1 = Math.pow(10, -0.4 * n.absmag) * 100 / (d * d);         // its energy at exposure 1
       // only part of the way, and never by more than a magnitude and a bit: the star glares, but the sky around it
       // stays full of stars however squarely it is faced
-      if (e1 * inView * target > E_MAX) target *= Math.max(0.3, Math.pow(E_MAX / (e1 * inView * target), 0.22));
+      if (e1 * inView * aim > E_MAX) aim *= Math.max(0.3, Math.pow(E_MAX / (e1 * inView * aim), 0.22));
     }
-    if (state.snap) { exposure = target; pointGain = Math.pow(10, 0.4 * gainPt); if (state.snap++ > 3) state.snap = 0; }
-    exposure *= Math.pow(target / exposure, 1 - Math.exp(-dt * (target < exposure ? 6 : 1.5)));
+    if (state.snap) { exposure = aim; pointGain = Math.pow(10, 0.4 * gainPt); if (state.snap++ > 3) state.snap = 0; }
+    exposure *= Math.pow(aim / exposure, 1 - Math.exp(-dt * (aim < exposure ? 6 : 1.5)));
     pointGain *= Math.pow(Math.pow(10, 0.4 * gainPt) / pointGain, 1 - Math.exp(-dt * 1.5));
     // catalogue stars keep their in-galaxy exposure: seen from outside they must not outshine the galaxy they sit in
     const starGain = Math.min(1, exposureBase / exposure * 1.0) ** 0.85;
@@ -446,7 +452,7 @@ async function main() {
       $('scale').textContent = fromSol < 0.01 ? 'Solar System' : fromSol < 1500 ? 'Stellar neighbourhood' : fromMW < 60000 ? 'Milky Way' : fromMW < 1.6e6 ? 'Local Group' : 'Cosmic web';
       $('hn').textContent = bn.alt < 2e-6 ? bodies.names[bn.id] + '  ' + fmtDist(bn.alt) : n.dist < 30 ? fmtDist(n.dist) : gn.id >= 0 ? gal.names[gn.id][0] + '  ' + fmtDist(gn.dist) : '';
       if (show.sound) updateSound(Math.max(0, Math.min(1, flight.speed / Math.max(flight.context, 1e-12) / 6)), fromSol < 0.01 ? 0 : fromSol < 1500 ? 1 : fromMW < 60000 ? 2 : fromMW < 1.6e6 ? 3 : 4, Math.max(0, Math.min(1, 1 - Math.log10(Math.max(stars.near.dist, 1e-6) / 1e-4) / 4)));
-      if (target.on) { const td = Math.hypot(target.x - cam.p[0], target.y - cam.p[1], target.z - cam.p[2]); $('ht').textContent = target.name + '  ' + fmtDist(td); }
+      if (target.on) { const td = Math.hypot(target.x - cam.p[0], target.y - cam.p[1], target.z - cam.p[2]); $('ht').textContent = target.name + '  ' + fmtDist(td); $('tbn').textContent = target.name + '  ' + fmtDist(td); $('tbgo').textContent = flight.goto ? 'Stop' : 'Fly there'; }
       if (showPerf) { const s = stars.stats(), g2 = galPts.stats(); $('perf').textContent = `${fps.toFixed(0)} fps  gpu ${gpuMs.toFixed(2)} ms  cpu ${cpuMs.toFixed(2)} ms\n${W}x${H}  scale ${resScale.toFixed(2)}\n${s.drawn.toLocaleString()} stars in ${s.tiles} tiles\n${s.loaded.toLocaleString()} loaded, ${s.pending} pending\nexposure ${exposure.toPrecision(3)}  mag ${magLimit.toFixed(1)} / ${galLimit.toFixed(1)}\n${g2.drawn.toLocaleString()} galaxies`; }
     }
   }
