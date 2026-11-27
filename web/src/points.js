@@ -214,5 +214,5 @@ export async function initPoints(gpu, globalsBuf, dir, quality, opt) {
     pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.setBindGroup(1, layerBind);
     for (let k = 0; k < nDraw; k++) { pass.setVertexBuffer(0, bufs[drawId[k]]); pass.draw(4, drawCount[k]); }
   }
-  return { update, draw, near, half: HALF, stats: () => ({ tiles: nDraw, drawn: drawnStars, loaded: loadedStars, pending, loading }) };
+  return { update, draw, near, half: HALF, step: STEP, stats: () => ({ tiles: nDraw, drawn: drawnStars, loaded: loadedStars, pending, loading }) };
 }

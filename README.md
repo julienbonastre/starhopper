@@ -16,14 +16,15 @@ Rendered with WebGPU and no engine. Everything on screen is either a public cata
 |---|---|
 | `W A S D`, mouse | fly and look (click the view to capture the mouse) |
 | `R` / `F`, `Q` / `E` | up / down, roll |
-| wheel, `Shift`, `Ctrl` | speed: exponential, and it follows how close things are |
+| scroll (two fingers on a trackpad), `Space` | the throttle, shown on a gauge at the right edge: it stays where you leave it, forward above the middle and back below; `Space` stops |
+| `+` `-`, `Shift`, `Ctrl` | how fast `W` and `S` go: exponential, and it follows how close things are |
 | click, then `G` | target what you are looking at, then fly to it |
-| `1` to `8`, `Home` | the fixed viewpoints, back to Earth |
+| `1` to `8`, `0` | the fixed viewpoints, back to Earth (`Home` also works; on a Mac that is `Fn` + left arrow) |
 | `L` `N` `X` | constellation figures, names, stars with known planets |
 | `P` | hide all procedural fill: measured data only |
-| `M`, `H`, `Tab`, `Esc` | sound, frame statistics, hide the panel, menu |
+| `M`, `H`, `Tab`, `Esc` | sound, frame statistics, hide the panel, menu (and `Esc` again to resume) |
 
-On a phone or tablet: drag the sky to look around; the strip on the right edge is the throttle (push up to fly forward, faster the further you push; pull down to back away; the top third is an overdrive that no longer slows for single stars, for crossing a galaxy in seconds; let go to stop; the Hold button below it keeps the speed so you can cruise hands-free). With two fingers, spread or pinch to fly and twist to roll. Tap something to target it: a bar at the bottom names it and offers "Fly there". Double tap to fly there at once, or long press for a go-to menu. During a fly-to the throttle strip sets the pace (up to hurry, down to hold still). Sound is on by default (`M` or the menu turns it off, and the menu has sliders for the overall volume and for the engine against the music): a drone and wind that follow your speed, under music composed as it plays, slow chords and occasional bells whose key follows the scale you are at. It is synthesised in the browser; nothing is downloaded. The menu has search, the viewpoints, named save points (kept in your browser), the detail level and the data credits.
+On a phone or tablet: drag the sky to look around; the strip on the right edge is the throttle (push up to fly forward, faster the further you push; pull down to back away; the top third is an overdrive that no longer slows for single stars, for crossing a galaxy in seconds; let go to stop; the Hold button below it keeps the speed so you can cruise hands-free). With two fingers, spread or pinch to fly and twist to roll. The ring at the bottom left is a stick for sliding sideways and up or down without turning (the keyboard's `A` `D` `R` `F`); it works together with a finger steering, so you can circle something while facing it; the target bar's Lock button (`O`) does the facing for you and holds the range, so the stick alone orbits the target. Tap something to target it: a bar at the bottom names it and offers "Fly there", a ring stays on it, and when it is out of view an arrow at the edge of the screen points the way back to it. Search lists matches as you type, forgiving a typo: pick one to target it, or its Fly button to go. Double tap to fly there at once, or long press for a go-to menu. During a fly-to the throttle strip sets the pace (up to hurry, down to hold still). Sound is on by default (`M` or the menu turns it off, and the menu has sliders for the overall volume and for the engine against the music): a drone and wind that follow your speed, under music composed as it plays, slow chords and occasional bells whose key follows the scale you are at. It is synthesised in the browser; nothing is downloaded. The menu has search, the viewpoints, named save points (kept in your browser), the detail level and the data credits.
 
 ## What is real and what is filled in
 
