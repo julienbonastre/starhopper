@@ -211,7 +211,10 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
   // Move everything to another date. A camera close to a body is carried along with it (not turned with it), so
   // that running the clock fast shows the planet spin and its moon go round instead of leaving it behind.
   function setTime(t) {
-    const i = near.id, ride = i > 0 && near.alt < radius[i] * 300, ox = pos[i * 3], oy = pos[i * 3 + 1], oz = pos[i * 3 + 2];
+    // which body, if any, the camera is beside now (it may have been moved since the last update())
+    let i = -1, best = Infinity;
+    for (let k = 1; k < NB; k++) { const alt = Math.hypot(pos[k * 3] - cam.p[0], pos[k * 3 + 1] - cam.p[1], pos[k * 3 + 2] - cam.p[2]) - radius[k]; if (alt < best) { best = alt; i = k; } }
+    const ride = i > 0 && best < radius[i] * 300, ox = pos[i * 3], oy = pos[i * 3 + 1], oz = pos[i * 3 + 2];
     place(t);
     if (ride) { cam.p[0] += pos[i * 3] - ox; cam.p[1] += pos[i * 3 + 1] - oy; cam.p[2] += pos[i * 3 + 2] - oz; }
   }

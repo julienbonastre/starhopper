@@ -117,7 +117,14 @@ export function flyTo(x, y, z, stop, dur = 7, q1 = null) {
   flight.goto = go;
 }
 // the place a fly-to is heading for has moved (a planet, with the clock running)
-export const retarget = (x, y, z) => { go.to[0] = x; go.to[1] = y; go.to[2] = z; };
+export function retarget(x, y, z) {
+  go.to[0] = x; go.to[1] = y; go.to[2] = z;
+  // the whole line is re-measured from where the flight began, so it still stops the asked distance short and,
+  // unless an arrival attitude was asked for, ends up facing the place as it now is
+  const dx = x - go.from[0], dy = y - go.from[1], dz = z - go.from[2];
+  go.d0 = Math.hypot(dx, dy, dz);
+  if (!go.slow && go.d0 > go.stop * 1.0001) lookQuat(go.q1, dx, dy, dz, cam.up[0], cam.up[1], cam.up[2]);
+}
 export const cancelGoto = () => { go.on = false; flight.goto = null; };
 
 const ease = (t) => t * t * t * (t * (6 * t - 15) + 10);
