@@ -11,6 +11,8 @@ import { initLabels } from './labels.js';
 import { POSES, setPose, place } from './poses.js';
 import { initBodies } from './bodies.js';
 import { initDeep } from './deep.js';
+import { initMarkers } from './markers.js';
+import { setSound, updateSound } from './audio.js';
 import { PLANETS, orbitPoints, jdNow } from './solar.js';
 
 const body = document.body, canvas = $('c');
@@ -41,9 +43,11 @@ async function main() {
     initGalaxies(gpu, globalsBuf, base, quality)]);
   const post = initPost(gpu, quality);
   const deep = await initDeep(gpu, globalsBuf, base, gal.noise);
+  const exo = await fetch(base + 'exoplanets.json').then((r) => r.json()).catch(() => ({ hosts: [] }));
+  const markers = initMarkers(gpu, globalsBuf, exo.hosts);
   // the planets are placed for today's date (?jd= pins it, for repeatable renders)
   const jd = +(params.get('jd') || 0) || jdNow();
-  const bodies = initBodies(gpu, globalsBuf, base, jd);
+  const bodies = initBodies(gpu, globalsBuf, base, jd, LEVEL === 0 ? 4096 : 2048);
 
   const state = { frozen: false, shot: null, snap: 1, frames: 0, skip: {} };   // skip: passes left out, for profiling
   // ---- view state
@@ -105,7 +109,7 @@ async function main() {
   // "Inside the Orion nebula" goes where the catalogue puts it: a little in from the near edge, looking through the heart
   { const i = deep.find('Great Orion Nebula'); if (i >= 0) { const c = [deep.pos(i, 0), deep.pos(i, 1), deep.pos(i, 2)], n = Math.hypot(...c), k = 1 - deep.radius(i) * 0.55 / n; place(3, { p: [c[0] * k, c[1] * k, c[2] * k], at: c, up: [0, 0, 1] }); } }
   // the picture comes first: figures and names are off until asked for
-  const show = { lines: false, names: false, proc: true, sound: false };
+  const show = { lines: false, names: false, proc: true, sound: false, exo: false };
   const labelLimit = { star: 0, con: 0, body: 0, deep: 0, galaxy: 0, target: 99 };
   const kindGain = { star: 1, con: 1, body: 1, deep: 1, galaxy: 1, target: 1 };
   const tgtLabel = labels.add('', 'target', 0, 0, 0, NaN, 0, 0, -100);   // the target marker: hidden (maxDist 0) until something is picked
@@ -137,19 +141,22 @@ async function main() {
     else if (code === 'Tab') body.classList.toggle('nohud');
     else if (code === 'KeyL') { show.lines = !show.lines; syncToggles(); }
     else if (code === 'KeyN') { show.names = !show.names; syncToggles(); }
+    else if (code === 'KeyX') { show.exo = !show.exo; syncToggles(); flash(show.exo ? markers.count.toLocaleString() + ' stars with known planets' : 'Exoplanet hosts hidden'); }
+    else if (code === 'KeyM') { show.sound = setSound(!show.sound); syncToggles(); flash(show.sound ? 'Sound on' : 'Sound off'); }
     else if (code === 'KeyP') { show.proc = !show.proc; syncToggles(); flash(show.proc ? 'Procedural fill on' : 'Measured data only'); }
     else if (/^Digit[1-8]$/.test(code)) { setPose(+code[5] - 1); state.snap = 1; flash(POSES[+code[5] - 1].name); }
     else if (code === 'Unlocked' && !params.has('auto')) body.classList.remove('fly');
     else if (code === 'KeyB' && params.has('bench')) { flash('Benchmark running'); runBench().then((r) => { showPerf = true; $('perf').hidden = false; console.log(JSON.stringify(r)); flash('Benchmark done'); $('s').textContent = JSON.stringify(r); body.classList.remove('fly'); }); }
   });
   const flash = (t) => { const m = $('msg'); m.textContent = t; m.classList.add('on'); clearTimeout(flash.t); flash.t = setTimeout(() => m.classList.remove('on'), 2200); };
-  document.querySelectorAll('#tg button').forEach((b) => { b.onclick = () => { show[b.dataset.k] = !show[b.dataset.k]; b.classList.toggle('on', show[b.dataset.k]); }; });
+  document.querySelectorAll('#tg button').forEach((b) => { b.onclick = () => { const k = b.dataset.k; show[k] = k === 'sound' ? setSound(!show[k]) : !show[k]; b.classList.toggle('on', show[k]); }; });
   const syncToggles = () => document.querySelectorAll('#tg button').forEach((b) => b.classList.toggle('on', show[b.dataset.k]));
   // search: every named star and galaxy; Enter flies to the best match, stopping a comfortable distance short
   // rows: search key, shown name, position, where a fly-to stops, absolute magnitude, kind (0 star, 1 galaxy, 2 planet, 3 nebula or cluster), radius
   const index = [];
   for (const s of names.stars) { if (s[0]) index.push([s[0].toLowerCase(), s[0], s[2], s[3], s[4], 0.0004, s[5], 0, 0]); if (s[1]) index.push([s[1].toLowerCase(), s[0] || s[1], s[2], s[3], s[4], 0.0004, s[5], 0, 0]); }
   gal.names.forEach((n, i) => index.push([n[0].toLowerCase(), n[0], gal.pos(i, 0), gal.pos(i, 1), gal.pos(i, 2), gal.radius(i) * 3.2, gal.absmag(i), 1, gal.radius(i)]));
+  for (const h of exo.hosts) index.push([h[0].toLowerCase(), h[0] + (h[4] > 1 ? ', ' + h[4] + ' planets' : ', 1 planet'), h[1], h[2], h[3], 0.0004, 30, 0, 0]);
   for (let i = 0; i < deep.count; i++) index.push([deep.name(i).toLowerCase(), deep.name(i), deep.pos(i, 0), deep.pos(i, 1), deep.pos(i, 2), deep.radius(i) * 2.6, deep.absmag(i), 3, deep.radius(i)]);
   for (let i = 1; i < bodies.count; i++) index.push([bodies.names[i].toLowerCase(), bodies.names[i], bodies.pos(i, 0), bodies.pos(i, 1), bodies.pos(i, 2), bodies.radius(i) * 4, -99, 2, bodies.radius(i)]);
   // target whatever lies closest to a view ray (unit vector), among the things bright enough to be on screen
@@ -231,7 +238,7 @@ async function main() {
   let gpuMs = 0, frameMs = 8, bench = null, scaleT = 0, period = 1 / 30, dtK = 0, winN = 0, winLate = 0, holdT = 0, hold = 6, calm = 0;
   let last = performance.now(), time = 0, frames = 0, fpsT = 0, fps = 0, cpuMs = 0;
   const dts = new Float32Array(128), dtSort = new Float32Array(128);
-  let busy = false, conFade = 0, nameFade = 0, labelT = 1, pointGain = 1, procFade = 1;
+  let busy = false, exoFade = 0, conFade = 0, nameFade = 0, labelT = 1, pointGain = 1, procFade = 1;
   const DIFFUSE = 20;   // extended light is lifted relative to point sources, as dark-adapted eyes do
   const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   function frame(now) {
@@ -271,7 +278,7 @@ async function main() {
     if (n.dist < 1e6) {
       const dx = n.x - cam.p[0], dy = n.y - cam.p[1], dz = n.z - cam.p[2], d = Math.max(n.dist, 1e-12);
       const cosA = (dx * cam.fwd[0] + dy * cam.fwd[1] + dz * cam.fwd[2]) / d;
-      const inView = Math.max(0, Math.min(1, (cosA - 0.2) / 0.5));       // fades out toward the edge of view and behind
+      const inView = Math.max(0, Math.min(1, (cosA - 0.72) / 0.16));     // only while it is on screen: there is no air out here to scatter it
       const e1 = Math.pow(10, -0.4 * n.absmag) * 100 / (d * d);         // its energy at exposure 1
       // only part of the way: the star still glares, and the brightest background stars stay in sight
       if (e1 * inView * target > E_MAX) target *= Math.pow(E_MAX / (e1 * inView * target), 0.62);
@@ -289,6 +296,8 @@ async function main() {
     galPts.update(galLimit);
     gal.update(W, H, pxScale, pointGain, starGain);
     deep.update();
+    exoFade += ((show.exo ? 1 : 0) - exoFade) * (1 - Math.exp(-dt * 5));
+    markers.update(exoFade);
 
     gf[0] = cam.right[0]; gf[1] = cam.right[1]; gf[2] = cam.right[2]; gf[3] = 1 / Math.tan(cam.fov / 2);
     gf[4] = cam.up[0]; gf[5] = cam.up[1]; gf[6] = cam.up[2]; gf[7] = W / H;
@@ -326,6 +335,7 @@ async function main() {
     if (!sk.galPts) galPts.draw(pass, pointGain);
     if (!sk.lines) lines.draw(pass);
     if (!sk.stars) stars.draw(pass, starGain);
+    markers.draw(pass);
     if (!sk.bodies) bodies.draw(pass);
     if (!sk.labels) labels.draw(pass);
     pass.end();
@@ -372,6 +382,7 @@ async function main() {
       const fromMW = gal.near.id === 0 ? 0 : Math.hypot(cam.p[0] - gal.pos(0, 0), cam.p[1] - gal.pos(0, 1), cam.p[2] - gal.pos(0, 2));
       $('scale').textContent = fromSol < 0.01 ? 'Solar System' : fromSol < 1500 ? 'Stellar neighbourhood' : fromMW < 60000 ? 'Milky Way' : fromMW < 1.6e6 ? 'Local Group' : 'Cosmic web';
       $('hn').textContent = bn.alt < 2e-6 ? bodies.names[bn.id] + '  ' + fmtDist(bn.alt) : n.dist < 30 ? fmtDist(n.dist) : gn.id >= 0 ? gal.names[gn.id][0] + '  ' + fmtDist(gn.dist) : '';
+      if (show.sound) updateSound(Math.max(0, Math.min(1, flight.speed / Math.max(flight.context, 1e-12) / 6)), fromSol < 0.01 ? 0 : fromSol < 1500 ? 1 : fromMW < 60000 ? 2 : fromMW < 1.6e6 ? 3 : 4, Math.max(0, Math.min(1, 1 - Math.log10(Math.max(stars.near.dist, 1e-6) / 1e-4) / 4)));
       if (target.on) { const td = Math.hypot(target.x - cam.p[0], target.y - cam.p[1], target.z - cam.p[2]); $('ht').textContent = target.name + '  ' + fmtDist(td); }
       if (showPerf) { const s = stars.stats(), g2 = galPts.stats(); $('perf').textContent = `${fps.toFixed(0)} fps  gpu ${gpuMs.toFixed(2)} ms  cpu ${cpuMs.toFixed(2)} ms\n${W}x${H}  scale ${resScale.toFixed(2)}\n${s.drawn.toLocaleString()} stars in ${s.tiles} tiles\n${s.loaded.toLocaleString()} loaded, ${s.pending} pending\nexposure ${exposure.toPrecision(3)}  mag ${magLimit.toFixed(1)} / ${galLimit.toFixed(1)}\n${g2.drawn.toLocaleString()} galaxies`; }
     }

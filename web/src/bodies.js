@@ -140,7 +140,7 @@ struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
 @vertex fn vs(@builtin(vertex_index) i: u32) -> VO { var o: VO; let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u)); o.pos = vec4f(p * 2.0 - 1.0, 0.0, 1.0); o.uv = vec2f(p.x, 1.0 - p.y); return o; }
 @fragment fn fs(i: VO) -> @location(0) vec4f { return textureSampleLevel(src, smp, i.uv, 0.0); }`;
 
-export function initBodies(gpu, globalsBuf, base, jd) {
+export function initBodies(gpu, globalsBuf, base, jd, texWidth = 4096) {
   const { device, queue } = gpu;
   const NB = PLANETS.length + 1, F = 20;
   // heliocentric positions for the date (fixed for the session: the planets move far too slowly to see)
@@ -169,7 +169,7 @@ export function initBodies(gpu, globalsBuf, base, jd) {
   queue.writeTexture({ texture: tex }, new Uint8Array([28, 60, 120, 255]), {}, [1, 1]);
   const mkBind = () => device.createBindGroup({ layout, entries: [{ binding: 0, resource: { buffer: globalsBuf } }, { binding: 1, resource: tex.createView() }, { binding: 2, resource: smp }] });
   let bind = mkBind();
-  fetch(base + 'earth.jpg').then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => createImageBitmap(b, { colorSpaceConversion: 'none' })).then((img) => {
+  fetch(base + 'earth.jpg').then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => createImageBitmap(b, { colorSpaceConversion: 'none', resizeWidth: texWidth, resizeHeight: texWidth / 2, resizeQuality: 'high' })).then((img) => {
     const w = img.width, h = img.height, levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
     const t = device.createTexture({ size: [w, h], mipLevelCount: levels, format: 'rgba8unorm-srgb', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
     queue.copyExternalImageToTexture({ source: img }, { texture: t }, [w, h]);

@@ -29,7 +29,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .cache
-          key: catalogues-${{ hashFiles('pipeline/sources.mjs') }}
+          key: catalogues-${{ hashFiles('pipeline/*.mjs') }}
       - run: npm run data
       - run: npm test
       - run: npm run build
