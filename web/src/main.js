@@ -129,7 +129,7 @@ async function main() {
 
   initInput(canvas, (code) => {
     if (code === 'KeyH') { showPerf = !showPerf; $('perf').hidden = !showPerf; }
-    else if (code === 'Home') flyTo(bodies.pos(3, 0), bodies.pos(3, 1), bodies.pos(3, 2), bodies.radius(3) * 4, 6);
+    else if (code === 'Home' || code === 'Digit0') flyTo(bodies.pos(3, 0), bodies.pos(3, 1), bodies.pos(3, 2), bodies.radius(3) * 4, 6);
     else if (code === 'KeyO') { setLock(!flight.lock); if (target.on) flash(flight.lock ? 'Locked on to ' + target.name : 'Lock released'); }
     else if (code === 'KeyG') { if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } }
     else if (code === 'Touch') $('ctx').hidden = true;
@@ -249,8 +249,16 @@ async function main() {
     if (show.sound) { show.sound = setSound(true); syncToggles(); }
     // phones fly in landscape: full screen first, since the orientation can only be locked there
     if (MOBILE) document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
-    else canvas.requestPointerLock?.()?.catch?.(() => {});
+    else {
+      // Chrome refuses to take the pointer again for about a second after Esc gave it back: ask once more then
+      const ask = () => canvas.requestPointerLock?.()?.catch?.(() => {});
+      const p = canvas.requestPointerLock?.();
+      p?.catch?.(() => setTimeout(() => { if (body.classList.contains('fly') && !flight.locked) ask(); }, 1300));
+    }
   };
+  // Esc leaves the flight for the menu (the browser hands the pointer back); Esc again goes back to the flight
+  let unlockedAt = 0; document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement) unlockedAt = performance.now(); });
+  addEventListener('keydown', (e) => { if (e.code === 'Escape' && !e.repeat && !body.classList.contains('fly') && !$('x').hidden && performance.now() - unlockedAt > 350) { e.preventDefault(); $('find').blur(); launch(); } });
   $('go').onclick = launch;
   $('home').onclick = () => { toEarth(); launch(); flash('Earth'); };
   $('x').onclick = launch;
