@@ -13,6 +13,7 @@ import { initBodies } from './bodies.js';
 import { initDeep } from './deep.js';
 import { initMarkers } from './markers.js';
 import { initBeyond } from './beyond.js';
+import { initWeb } from './web.js';
 import { setSound, updateSound } from './audio.js';
 import { PLANETS, orbitPoints, jdNow } from './solar.js';
 
@@ -231,6 +232,8 @@ async function main() {
 
   // Everything the first frame does not need: names, constellation figures, nebulae and clusters, exoplanet hosts.
   // Fetched together once the flight is already on screen.
+  let web = null;
+  initWeb(gpu, globalsBuf, base).then((w) => { web = w; }).catch((e) => console.warn('no density grid', e));
   const extras = Promise.all([fetch(base + 'names.json').then((r) => r.json()), fetch(base + 'constellations.json').then((r) => r.json()),
     initDeep(gpu, globalsBuf, base, gal.noise), fetch(base + 'exoplanets.json').then((r) => r.json()).catch(() => ({ hosts: [] }))]).then(([names, cons, dp, exo]) => {
     for (const c of cons) {
@@ -294,7 +297,7 @@ async function main() {
     //  - up by a few magnitudes once outside a galaxy's disc, so its surface brightness reads well
     //  - (points only) up further in the voids, so that distant galaxies show: pointGain
     const gainSB = 1.75 * sm(0.6, 2.0, out) + 1.0 * sm(3, 30, env);
-    const gainPt = Math.min(6.5, 4.2 * Math.log10(Math.max(env / 0.7, 1)));
+    const gainPt = Math.min(5.6, 4.2 * Math.log10(Math.max(env / 0.7, 1)));
     const n = stars.near;
     let target = exposureBase * Math.pow(10, 0.4 * gainSB);
     if (n.dist < 1e6) {
@@ -318,6 +321,8 @@ async function main() {
     galPts.update(galLimit);
     gal.update(W, H, pxScale, pointGain, starGain);
     beyond.update(pointGain);
+    // the web's glow belongs to the largest scale only: megaparsecs from the nearest catalogued galaxy
+    if (web) web.update(state.skip.web ? 0 : sm(2.5e6, 1.2e7, gn.id >= 0 ? gn.dist : 1e9));
     deep.update((1 / Math.tan(cam.fov / 2)) * (H / pxScale) * 0.5);
     exoFade += ((show.exo ? 1 : 0) - exoFade) * (1 - Math.exp(-dt * 5));
     markers.update(exoFade);
@@ -350,7 +355,7 @@ async function main() {
     const enc = device.createCommandEncoder();
     // the GPU timer runs from the first pass of the frame (the volume pass when there is one) to the last
     const timed = ts && !ts.busy && (bench || showPerf || (state.frames & 3) === 0), sk = state.skip;
-    const hadVol = !sk.vol && gal.drawVolumes(enc, timed ? tsBegin : undefined, sk.deep ? null : deep);
+    const hadVol = !sk.vol && gal.drawVolumes(enc, timed ? tsBegin : undefined, sk.deep ? null : deep, web);
     const sceneDesc = post.sceneAttach(); sceneDesc.timestampWrites = timed && !hadVol ? tsBegin : undefined;
     const pass = enc.beginRenderPass(sceneDesc);
     if (!sk.gal) gal.draw(pass, hadVol, sk);

@@ -42,6 +42,7 @@ Procedural, and hidden by `P`:
 - The shapes of galaxies (spiral, elliptical or irregular from the catalogued type, size and tilt) and of nebulae.
 - The Milky Way's diffuse light and dust, and individual "fill" stars where the catalogue is incomplete.
 - Galaxies beyond the survey limit and behind the plane of the Milky Way: a statistical continuation of the web.
+- The glow of the cosmic web: the survey's galaxies counted into a 128-cell density grid (4 Mpc cells, corrected for the survey thinning with distance) and drawn as faint light, megaparsecs from any galaxy.
 - The Earth's clouds (the Blue Marble is a cloud-free mosaic), Saturn's ring detail and the giants' bands.
 
 Every source, with its licence and credit, is listed in the app under "Data and credits" and in the generated `data/manifest.json`.
@@ -71,22 +72,22 @@ On a MacBook Pro (M5 Pro, 20 GPU cores), Chrome 158, macOS 26.7, High detail, 30
 | | average | 99th percentile | maximum |
 |---|---|---|---|
 | Frame interval | 8.33 ms | 10.3 ms | 10.4 ms |
-| GPU time per frame | 4.81 ms | 6.35 ms | 9.75 ms |
+| GPU time per frame | 4.03 ms | 6.32 ms | 7.96 ms |
 
 - No frame was presented late (0 of 10,849).
-- One GPU sample of 9,553 exceeded 8.3 ms. It recurs at the instant the last leg starts and never delays a frame; its cause is not yet found.
-- JS heap at the end of the run: 37 MB.
+- No GPU sample of 10,218 exceeded 8.3 ms.
+- JS heap at the end of the run: 40 MB.
 
 Sizes:
 
 - `index.html` is 101 kB (37 kB gzipped) and holds all the code.
 - Needed before the first frame: the page, the star and galaxy indexes, the detailed galaxies and the first star tile, about 0.9 MB.
-- Streamed afterwards as you fly: star tiles 42 MB in 1,797 files (the view from Earth uses about 14 MB of them), galaxy tiles 5.6 MB, names, nebulae and exoplanet hosts 0.6 MB, the Earth image 2.3 MB.
+- Streamed afterwards as you fly: star tiles 42 MB in 1,797 files (the view from Earth uses about 14 MB of them), galaxy tiles 5.6 MB, names, nebulae and exoplanet hosts 0.6 MB, the Earth image 2.3 MB, the galaxy density grid 0.8 MB.
 
 ## Not done, or not verified
 
 - **Phones**: the touch controls, landscape lock, detail levels and Save-Data handling are written but have not been run on a phone. The Galaxy S23 Ultra performance target is unmeasured.
-- **Visual review**: three rounds with an independent critic that sees only the renders took the verdict from "blocker" to "major", not to the brief's "nothing above minor". Nothing reads as broken and nothing pops between frames. Since round three the emission nebulae have been remodelled (a cavity with ionisation fronts, filaments and opaque dust in place of fog) and the Milky Way's band from inside is sampled on spheres around the camera, which removed its parallel streaks; neither has been re-reviewed. Still open from round three: the cosmic web reads as a field of dots; the Milky Way from above is too smooth and shows no bar; Earth's clouds are soft up close.
+- **Visual review**: four rounds with an independent critic that sees only the renders have not reached the brief's "nothing above minor". Round four (after the nebulae were remodelled as cavities with ionisation fronts and the Milky Way's streaks were removed) found one blocker, the Pleiades drawn in red emission, which is fixed: their dust now shines blue by reflection. Its majors that remain open: the Milky Way's band from inside reads as grey smoke without grain; the inside of the Orion nebula is soft with gritty edges; the Milky Way from above is a clean two-arm pinwheel with no bar; Andromeda's inner and outer disc disagree; the Sun at 70 AU is a disc in a halo. The cosmic web has since gained a density glow, not yet re-reviewed. Nothing pops between frames.
 - **Redshift distances** stretch galaxy clusters along the line of sight from Earth ("fingers of God"). This is in the data and is left as it is.
 - **M32** sits 280 kpc from Andromeda because the Local Volume catalogue lists it at 0.49 Mpc.
 - **Live-database snapshots**: the NASA Exoplanet Archive and SIMBAD have no versioned releases, so the exact query results fetched on 2026-11-27 are kept in `pipeline/snapshots` (0.6 MB) and checked against their checksums like every other source. The build does not query either database; `pipeline/lib.mjs` says how to refresh them.

@@ -6,12 +6,14 @@
 //                  Record 0 is the Milky Way itself (a documented model, not a catalogue entry).
 //   record = gx, gy, gz, packed (uint32) + radius_pc, nx, ny, nz, spheroid flattening (float32) + seed (uint32) = 40 bytes
 //   packed = absmag16 << 16 | type8 << 8 | flags8      type: 0 E, 1 S0, 2 Sa .. 8 Sd/Sm, 9 Irr; +16 barred, +32 weakly barred
+import { gzipSync } from 'node:zlib';
 import { fetchSource, readCsv, readTsv, writeOut, eq2xyz, sexa, DEG } from './lib.mjs';
 import { SOURCES } from './sources.mjs';
 import { bakeTree } from './octree.mjs';
 
 export const GHALF = 2 ** 29;                 // parsecs (about 537 Mpc)
 export const GSTEP = (2 * GHALF) / 2 ** 31;   // 0.5 pc per grid unit
+export const WEB_N = 128, WEB_HALF = 272e6;   // the density grid: cells of 4.25 Mpc
 const H0 = 70;                                // km/s/Mpc, only for galaxies with no better distance
 // The Milky Way as seen from outside. Centre: Sgr A* (GRAVITY 2019: 8178 pc). Pole: IAU north galactic pole.
 // Size and luminosity: D25 = 26.8 kpc (Goodwin et al. 1998), M_B = -20.3; type SBbc.
@@ -155,5 +157,37 @@ export async function bakeGalaxies(opts) {
   }
   if (noMag) console.log(`  galaxies: ${noMag} GLADE entries have no magnitude and are placed as faint dwarfs`);
   const tree = bakeTree('galaxies', { half: GHALF, step: GSTEP, n, gx, gy, gz, pk, am });
-  return { detailed: det.length, points: n, tiles: tree.tiles, bytes: tree.bytes };
+
+  // ---- the cosmic web as a density field: every GLADE galaxy dropped into a WEB_N^3 grid over +-WEB_HALF, each
+  // weighted by how incomplete the survey is at its distance (so that far structure is not fainter merely because
+  // fewer of its galaxies were catalogued), then smoothed. The renderer marches through it as a faint glow.
+  const W = WEB_N, cellPc = (2 * WEB_HALF) / W, SH = 10e6, shells = new Float64Array(Math.ceil(WEB_HALF / SH));
+  for (const g of gl) { const k = Math.floor((g.d * 1e6) / SH); if (k < shells.length) shells[k]++; }
+  const dens = Array.from(shells, (c, k) => c / (((k + 1) ** 3 - k ** 3) * SH ** 3)), ref = Math.max(dens[2], dens[3], dens[4]);
+  let grid = new Float32Array(W * W * W);
+  for (const g of gl) {
+    const d = g.d * 1e6, k = Math.floor(d / SH);
+    if (k >= shells.length || d < 3e6) continue;
+    const wgt = Math.min(40, ref / Math.max(dens[k], ref / 40)) * (1 - Math.min(1, Math.max(0, (d - 0.88 * WEB_HALF) / (0.1 * WEB_HALF))));
+    const [x, y, z] = eq2xyz(g.ra, g.dec, d), fx = (x + WEB_HALF) / cellPc - 0.5, fy = (y + WEB_HALF) / cellPc - 0.5, fz = (z + WEB_HALF) / cellPc - 0.5;
+    const ix = Math.floor(fx), iy = Math.floor(fy), iz = Math.floor(fz), tx = fx - ix, ty = fy - iy, tz = fz - iz;
+    for (let c = 0; c < 8; c++) {
+      const cx = ix + (c & 1), cy = iy + ((c >> 1) & 1), cz = iz + (c >> 2);
+      if (cx < 0 || cy < 0 || cz < 0 || cx >= W || cy >= W || cz >= W) continue;
+      grid[(cz * W + cy) * W + cx] += wgt * (c & 1 ? tx : 1 - tx) * ((c >> 1) & 1 ? ty : 1 - ty) * (c >> 2 ? tz : 1 - tz);
+    }
+  }
+  // two passes of a 1-2-1 blur along each axis: a Gaussian of about one cell
+  for (let pass = 0; pass < 2; pass++) for (const st of [1, W, W * W]) {
+    const out = new Float32Array(grid.length);
+    for (let i = 0; i < grid.length; i++) out[i] = 0.5 * grid[i] + 0.25 * ((i - st >= 0 ? grid[i - st] : 0) + (i + st < grid.length ? grid[i + st] : 0));
+    grid = out;
+  }
+  const sorted = Float32Array.from(grid).sort(), top = sorted[Math.floor(sorted.length * 0.9995)];
+  const web = new Uint8Array(grid.length);
+  for (let i = 0; i < grid.length; i++) web[i] = Math.round(255 * Math.sqrt(Math.min(1, grid[i] / top)));
+  const webGz = gzipSync(web, { level: 9 });
+  writeOut('web.bin.gz', webGz);
+  writeOut('web.json', JSON.stringify({ n: W, half: WEB_HALF, bytes: webGz.length }));
+  return { detailed: det.length, points: n, tiles: tree.tiles, bytes: tree.bytes, web: webGz.length };
 }

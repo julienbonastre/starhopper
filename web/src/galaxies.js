@@ -500,13 +500,14 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
   }
   // the reduced-resolution volume pass (its own render pass), then blit + impostors inside the scene pass
   // deep: the nebula layer, whose large members share this target
-  function drawVolumes(enc, timestampWrites, deep) {
-    const extra = deep && deep.hasBig();
-    if (!nVol && !extra) return false;
+  function drawVolumes(enc, timestampWrites, deep, web) {
+    const extra = deep && deep.hasBig(), glow = web && web.on();
+    if (!nVol && !extra && !glow) return false;
     volAttach.timestampWrites = timestampWrites;
     const p = enc.beginRenderPass(volAttach);
     if (nVol) { p.setPipeline(volume); p.setBindGroup(0, vBind); p.draw(3); }
     if (extra) deep.drawBig(p);
+    if (glow) web.draw(p);
     p.end();
     return true;
   }

@@ -42,7 +42,9 @@ const CORE = 6.5;     // ... up to this sigma in CSS pixels
   // A star's disc grows with its brightness only so far (CORE pixels): beyond that it would read as a ball. The
   // rest shows as glare, a wide soft halo whose reach grows with the logarithm of the excess.
   let ep = e * G.pxScale * G.pxScale;
-  let sigma = min(max(s0, sqrt(ep / (6.2831853 * PEAK))), CORE * G.pxScale);
+  // galaxies are extended: the brighter ones spread into soft blobs long before a star would
+  let pk = select(PEAK, 0.3, L.sigma0 > 0.9);
+  let sigma = min(max(s0, sqrt(ep / (6.2831853 * pk))), CORE * G.pxScale);
   let peak = min(ep / (6.2831853 * sigma * sigma), 40.0);
   let over = log2(1.0 + ep / (6.2831853 * PEAK * CORE * CORE * G.pxScale * G.pxScale));   // 1 where the disc stops growing
   let glare = smoothstep(0.6, 1.6, over);

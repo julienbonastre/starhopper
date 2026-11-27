@@ -52,7 +52,7 @@ const YOUNGSTAR = vec3f(0.72, 0.82, 1.0);
   if (i.psf.x > 0.0) {
     let r2 = dot(i.uv, i.uv) / (i.psf.y * i.psf.y);
     var tint = HA;
-    if (kind == 6.0 || kind == 7.0) { tint = DUSTBLUE; } else if (kind == 1.0) { tint = OLDSTAR; } else if (kind == 0.0) { tint = YOUNGSTAR; } else if (kind == 3.0) { tint = O3; }
+    if (kind == 6.0) { tint = DUSTBLUE; } else if (kind == 1.0) { tint = OLDSTAR; } else if (kind == 0.0) { tint = YOUNGSTAR; } else if (kind == 3.0) { tint = O3; }
     col += mix(vec3f(1.0), tint, 0.6) * i.psf.x * exp(-0.5 * r2);
   }
   if (i.prm.w > 0.0) {
@@ -64,7 +64,7 @@ const YOUNGSTAR = vec3f(0.72, 0.82, 1.0);
       let h = sqrt(1.0 - p2);
       let t0 = max(b - h, 0.0); let t1 = b + h;
       if (t1 > t0) {
-        let gas = kind == 2.0 || kind == 4.0 || kind == 5.0 || kind == 7.0;
+        let gas = kind != 6.0;
         let N = select(18.0, 26.0, gas);
         let jit = ign(i.pos.xy);
         var acc = vec3f(0.0); var tr = 1.0;
@@ -128,7 +128,7 @@ const YOUNGSTAR = vec3f(0.72, 0.82, 1.0);
             dust = body * smoothstep(0.48, 0.68, vnoise(w1 * 1.7 + 5.0) * 0.6 + n3 * 0.4) * 22.0 * 0.4;
             // reflection: blue starlight on dust, in fine combed wisps
             let wisp = pow(1.0 - abs(2.0 * vnoise(vec3f(w2.x * 3.5, w2.y * 0.9, w2.z * 0.9)) - 1.0), 3.0);
-            em = mix(DUSTBLUE, vec3f(0.62, 0.76, 1.0), cloud) * body * (0.04 + 1.3 * cloud * (0.35 + wisp)) * (1.0 / 1.6);
+            em = mix(DUSTBLUE, vec3f(0.62, 0.76, 1.0), cloud) * body * (0.1 + 1.3 * cloud * (0.35 + wisp)) * 3.0;
           }
           let a = exp(-dust * dt);
           acc += tr * em * edge * (1.0 + a) * 0.5;
@@ -150,6 +150,11 @@ export async function initDeep(gpu, globalsBuf, base, noise) {
   const data = await fetch(base + 'deep.json').then((r) => (r.ok ? r.json() : { kinds: [], objects: [] })).catch(() => ({ kinds: [], objects: [] }));
   // dark nebulae are not drawn (nothing here can dim what is behind them); the rest are
   const objs = data.objects.filter((o) => o[2] !== 8), N = objs.length;
+  // The catalogue's types do not always say what lights a nebula (it files the Maia nebula under HII regions and
+  // the Merope nebula under plain "nebula"). Dust around stars too cool to ionise it shines blue by reflection:
+  // everything in the Pleiades, and a few famous cases by name. The other plain nebulae are emission nebulae.
+  const pl = objs.find((o) => o[0] === 'Pleiades'), REFL = /^(rho Oph|Iris|Witch Head|Merope|Maia)/;
+  for (const o of objs) if ((o[2] === 4 || o[2] === 5 || o[2] === 7) && (REFL.test(o[0]) || (pl && Math.hypot(o[3] - pl[3], o[4] - pl[4], o[5] - pl[5]) < 12))) o[2] = 6;
   const pos = new Float64Array(N * 3), rad = new Float32Array(N), lum = new Float32Array(N), kind = new Uint8Array(N), seed = new Float32Array(N), absmag = new Float32Array(N);
   objs.forEach((o, i) => {
     pos[i * 3] = o[3]; pos[i * 3 + 1] = o[4]; pos[i * 3 + 2] = o[5]; rad[i] = o[6]; kind[i] = o[2]; seed[i] = (o[8] % 997) * 0.731;
