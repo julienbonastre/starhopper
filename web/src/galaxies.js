@@ -43,10 +43,10 @@ const HII = vec3f(1.0, 0.28, 0.42);
 fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32) -> vec4f {
   let r2 = dot(q.xy, q.xy); let r = sqrt(r2);
   let s2 = r2 + q.z * q.z / (p.qz * p.qz);
-  let bul = p.fb / (9.8696 * p.qz * p.rb * p.rb * p.rb) * pow(1.0 + s2 / (p.rb * p.rb), -2.0) * smoothstep(1.7, 1.0, sqrt(s2));
+  let bul = p.fb / (9.8696 * p.qz * p.rb * p.rb * p.rb) * pow(1.0 + s2 / (p.rb * p.rb), -2.0) * (1.0 - smoothstep(1.0, 1.7, sqrt(s2)));
   if (p.fb >= 0.999) { return vec4f(OLD * bul, 0.0); }
   let az = abs(q.z);
-  let disc = (1.0 - p.fb) / (12.566 * p.h * p.h * p.hz) * exp(-r / p.h - az / p.hz) * smoothstep(1.65, 0.85, r);
+  let disc = (1.0 - p.fb) / (12.566 * p.h * p.h * p.hz) * exp(-r / p.h - az / p.hz) * (1.0 - smoothstep(0.85, 1.65, r));
   if (disc < 1e-4 && bul < 1e-4) { return vec4f(0.0); }
   let th = atan2(q.y, q.x) * p.wind;
   let ph = p.arms * (th - log(max(r, 0.02)) * p.pitch) + p.phase;
@@ -71,7 +71,7 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32) -> vec4f {
     col += OLD * p.bar * (1.0 - p.fb) * 2.6 * exp(-(xb.x * xb.x) / 0.045 - (xb.y * xb.y) / 0.0035 - q.z * q.z / 0.003);
   }
   let cd = 0.5 + 0.5 * cos(ph + 0.85);
-  let dust = (1.0 - p.fb) * exp(-r / (p.h * 1.5) - az / (p.hz * 0.4)) * (0.2 + 1.6 * cd * cd * inner * p.armC + p.clump) * (0.35 + 1.3 * n1) * smoothstep(1.5, 1.0, r);
+  let dust = (1.0 - p.fb) * exp(-r / (p.h * 1.5) - az / (p.hz * 0.4)) * (0.2 + 1.6 * cd * cd * inner * p.armC + p.clump) * (0.35 + 1.3 * n1) * (1.0 - smoothstep(1.0, 1.5, r));
   return vec4f(col, dust);
 }
 `;
@@ -226,7 +226,7 @@ struct VO {
     let across2 = max(dot(off, off) - along * along, 0.0);
     let qa = sqrt(max(1.0 - sinI * sinI * (1.0 - P.qz * P.qz), 0.01));     // apparent axis ratio of the spheroid
     let rr = across2 + along * along / (qa * qa);
-    var em = OLD * P.fb / (6.2831853 * qa * P.rb * P.rb) * pow(1.0 + rr / (P.rb * P.rb), -1.5) * smoothstep(1.7, 1.0, sqrt(rr));
+    var em = OLD * P.fb / (6.2831853 * qa * P.rb * P.rb) * pow(1.0 + rr / (P.rb * P.rb), -1.5) * (1.0 - smoothstep(1.0, 1.7, sqrt(rr)));
     if (P.fb < 0.999 && t > 0.0) {
       // face-on basis in the disc plane
       let ax = normalize(cross(n, select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), abs(n.x) > 0.7)));
