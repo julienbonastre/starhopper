@@ -153,8 +153,9 @@ async function main() {
   const ts = gpu.hasTS ? { set: device.createQuerySet({ type: 'timestamp', count: 2 }), resolve: device.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }), read: device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), busy: false } : null;
   const tsBegin = ts && { querySet: ts.set, beginningOfPassWriteIndex: 0 }, tsEnd = ts && { querySet: ts.set, endOfPassWriteIndex: 1 };
   const gpuDone = () => { const a = new BigInt64Array(ts.read.getMappedRange()); const ms = Number(a[1] - a[0]) / 1e6; ts.read.unmap(); ts.busy = false; if (ms > 0 && ms < 500) { gpuMs += (ms - gpuMs) * 0.1; if (bench) bench.gpu.push(ms); } };
-  let gpuMs = 0, frameMs = 8, bench = null, scaleT = 0, minDt = 0.05;
+  let gpuMs = 0, frameMs = 8, bench = null, scaleT = 0, period = 1 / 30, dtK = 0, winN = 0, winLate = 0, holdT = 0, hold = 6, calm = 0;
   let last = performance.now(), time = 0, frames = 0, fpsT = 0, fps = 0, cpuMs = 0;
+  const dts = new Float32Array(128), dtSort = new Float32Array(128);
   let busy = false, conFade = 1, nameFade = 1, labelT = 1, pointGain = 1, procFade = 1;
   const DIFFUSE = 11;   // extended light is lifted relative to point sources, as dark-adapted eyes do
   function frame(now) {
@@ -251,17 +252,30 @@ async function main() {
     if (state.shot) { const r = state.shot; state.shot = null; r(); }
 
     cpuMs += (performance.now() - t0 - cpuMs) * 0.05;
-    // hold the display's frame rate: drop the resolution a step when frames run long, raise it when the GPU has room
-    if (dt > 0) { frameMs += (dt * 1000 - frameMs) * 0.05; if (dt < minDt && dt > 0.003) minDt = dt; if (bench) bench.frame.push(dt * 1000); }
-    scaleT += dt;
-    if (scaleT > 1.5 && !gpu.offscreen && !params.has('fixed')) {
-      scaleT = 0;
-      const budget = minDt * 1000;
-      // GPU time grows with the pixel count, so the scale the budget allows can be estimated directly; move a
-      // third of the way there each step, and only down on evidence of missed frames
-      const fit = gpuMs > 0 ? resScale * Math.sqrt(budget * 0.72 / gpuMs) : resScale;
-      if (frameMs > budget * 1.18 && resScale > 0.45) { resScale = Math.max(0.45, Math.min(resScale - 0.05, gpuMs > 0 ? fit : 1)); resize(); }
-      else if (ts && fit > resScale + 0.04 && frameMs < budget * 1.08 && resScale < quality.startScale) { resScale = Math.min(quality.startScale, resScale + (fit - resScale) / 3); resize(); }
+    // Hold the display's frame rate by trading resolution. GPU time alone cannot steer this: an idle GPU clocks
+    // down and reports long times for light frames. So the evidence for stepping down is frames actually missed
+    // while the GPU is busy; stepping back up is tried whenever frames have been on time for a while, with a
+    // hold after each retreat that doubles if the same step fails again.
+    if (dt > 0) {
+      frameMs += (dt * 1000 - frameMs) * 0.05;
+      dts[dtK++ & 127] = dt; winN++; if (dt > period * 1.6) winLate++;
+      if (bench) bench.frame.push(dt * 1000);
+    }
+    scaleT += dt; holdT -= dt;
+    if (scaleT > 1.5) {
+      const late = winLate / Math.max(1, winN), budget = period * 1000;
+      scaleT = 0; winN = winLate = 0;
+      // the display's refresh period: the median of recent frame intervals (they jitter a couple of ms either way).
+      // Only ever revised downward, so a slow spell is not mistaken for a slower display.
+      if (dtK >= 128) { dtSort.set(dts); dtSort.sort(); if (dtSort[64] < period) period = dtSort[64]; }
+      if (!gpu.offscreen && !params.has('fixed')) {
+        if (late > 0.08 && gpuMs > budget * 0.55 && resScale > 0.45) {
+          resScale = Math.max(0.45, resScale * 0.9); holdT = hold; hold = Math.min(60, hold * 2); calm = 0; resize();
+        } else if (late < 0.01) {
+          if (++calm > 20) hold = 6;                                   // long quiet: forget the back-off
+          if (holdT <= 0 && resScale < quality.startScale) { resScale = Math.min(quality.startScale, resScale * 1.06); resize(); }
+        } else calm = 0;
+      }
     }
     frames++; fpsT += dt;
     if (fpsT >= 0.5) { fps = frames / fpsT; frames = 0; fpsT = 0; }
@@ -292,7 +306,8 @@ async function main() {
     bench = { frame: [], gpu: [] };
     for (let i = 1; i <= POSES.length; i++) { const p = POSES[i % POSES.length]; flyTo(p.p[0], p.p[1], p.p[2], 0, secs); await new Promise((r) => setTimeout(r, secs * 1000 + 300)); }
     const b = bench; bench = null;
-    return { frameMs: stat(b.frame), gpuMs: stat(b.gpu), size: [W, H], scale: resScale, level: LEVEL, mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null };
+    const budget = period * 1000;
+    return { frameMs: stat(b.frame), gpuMs: stat(b.gpu), late: b.frame.filter((x) => x > budget * 1.6).length, gpuOver: b.gpu.filter((x) => x > 8.3).length, size: [W, H], scale: resScale, level: LEVEL, mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null };
   };
   window.SH = { bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
 }
