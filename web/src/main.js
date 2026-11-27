@@ -116,11 +116,17 @@ async function main() {
     if (code === 'KeyH') { showPerf = !showPerf; $('perf').hidden = !showPerf; }
     else if (code === 'Home') flyTo(bodies.pos(3, 0), bodies.pos(3, 1), bodies.pos(3, 2), bodies.radius(3) * 4, 6);
     else if (code === 'KeyG') { if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } }
-    else if (code === 'Tap' || code === 'DoubleTap') {
+    else if (code === 'Touch') $('ctx').hidden = true;
+    else if (code === 'Tap' || code === 'DoubleTap' || code === 'Hold') {
       const nx = flight.tapX / innerWidth * 2 - 1, ny = 1 - flight.tapY / innerHeight * 2, f = 1 / Math.tan(cam.fov / 2), asp = innerWidth / innerHeight;
       let dx = cam.right[0] * nx * asp / f + cam.up[0] * ny / f + cam.fwd[0], dy = cam.right[1] * nx * asp / f + cam.up[1] * ny / f + cam.fwd[1], dz = cam.right[2] * nx * asp / f + cam.up[2] * ny / f + cam.fwd[2];
       const n = Math.hypot(dx, dy, dz); pick(dx / n, dy / n, dz / n);
       if (code === 'DoubleTap' && target.on) flyTo(target.x, target.y, target.z, target.stop, 9);
+      // held on something: offer to go there, in a small menu beside the finger
+      if (code === 'Hold' && target.on) {
+        const c = $('ctx'); flight.menu = true; $('ctxn').textContent = target.name;
+        c.style.left = Math.max(8, Math.min(innerWidth - 190, flight.tapX + 14)) + 'px'; c.style.top = Math.max(8, Math.min(innerHeight - 110, flight.tapY - 40)) + 'px'; c.hidden = false;
+      } else $('ctx').hidden = true;
     }
     else if (code === 'BracketRight') exposureBase = Math.min(4000, exposureBase * 1.25);
     else if (code === 'BracketLeft') exposureBase = Math.max(0.5, exposureBase / 1.25);
@@ -200,6 +206,8 @@ async function main() {
     saves.push({ n: n.slice(0, 40), p: [cam.p[0], cam.p[1], cam.p[2]], q: [cam.q[0], cam.q[1], cam.q[2], cam.q[3]] });
     keep('starhopperSaves', JSON.stringify(saves)); $('svn').value = ''; drawSaves(); $('s').textContent = 'Saved: ' + n;
   };
+  $('ctxgo').onclick = () => { $('ctx').hidden = true; flight.menu = false; if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } };
+  $('ctxno').onclick = () => { $('ctx').hidden = true; flight.menu = false; };
   $('svb').onclick = save;
   $('svn').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') save(); });
   drawSaves();
@@ -407,7 +415,8 @@ async function main() {
   say('Loading the nearest stars', 0.7);
   requestAnimationFrame(frame);
   // ready as soon as the first star tile (the brightest stars everywhere) is in: the rest streams in behind it
-  await new Promise((r) => { const t = setInterval(() => { if (stars.stats().tiles > 0) { clearInterval(t); r(); } }, 50); });
+  // (out between the galaxies no star tile is wanted at all: then a few frames with nothing pending will do)
+  await new Promise((r) => { const t = setInterval(() => { const s = stars.stats(); if (s.tiles > 0 || (s.pending === 0 && state.frames > 5)) { clearInterval(t); r(); } }, 50); });
   say('Ready', 1); $('go').disabled = false; body.classList.remove('l');
   keep('starhopperLoad', '');
   try { localStorage.removeItem('starhopperLoad'); } catch {}

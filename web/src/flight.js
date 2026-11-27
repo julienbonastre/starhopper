@@ -10,6 +10,7 @@ export const flight = {
   goto: null,                  // active fly-to
   locked: false,
   tapX: 0, tapY: 0,            // where the last touch tap landed (CSS pixels)
+  menu: false,                 // a touch-and-hold menu is open: the finger that opened it does not fly
 };
 const keys = new Set();
 let lookX = 0, lookY = 0, touch = new Map();
@@ -27,19 +28,38 @@ export function initInput(canvas, onAction) {
   addEventListener('blur', () => keys.clear());
   document.addEventListener('pointerlockchange', () => { flight.locked = document.pointerLockElement === canvas; onAction(flight.locked ? 'Locked' : 'Unlocked'); });
   addEventListener('mousemove', (e) => { if (flight.locked) { lookX += e.movementX; lookY += e.movementY; } });
-  // touch: one finger flies forward and steers by how far it has slid from where it went down; a second finger
-  // pinches the throttle. A quick tap is passed on as an action.
-  const tp = new Map(); let pinch = 0, downT = 0, lastTap = 0;
+  // Touch. One finger: slide to steer and fly forward; held still on something, it targets it and offers to go there.
+  // Two fingers: twist to roll, drag up or down (or pinch) for speed. A quick tap targets, a double tap flies there.
+  const tp = new Map(); let pinch = 0, twist = 0, midY = 0, two = false, downT = 0, lastTap = 0, holdTimer = 0;
+  const HOLD_MS = 450, SLOP = 12;
   canvas.addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'touch') return;
-    canvas.setPointerCapture(e.pointerId); tp.set(e.pointerId, { x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY }); downT = performance.now(); pinch = 0;
+    canvas.setPointerCapture(e.pointerId); tp.set(e.pointerId, { x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, moved: false, t: performance.now() });
+    downT = performance.now(); pinch = 0; two = tp.size === 2;
+    if (flight.menu) { flight.menu = false; onAction('Touch'); }               // any new touch puts the hold menu away
+    clearTimeout(holdTimer);
+    if (tp.size === 1) holdTimer = setTimeout(() => { const t = tp.values().next().value; if (tp.size === 1 && t && !t.moved) { flight.tapX = t.x; flight.tapY = t.y; onAction('Hold'); } }, HOLD_MS);
   });
   canvas.addEventListener('pointermove', (e) => {
     const t = tp.get(e.pointerId); if (!t) return;
     t.x = e.clientX; t.y = e.clientY;
-    if (tp.size === 2) { const [a, b] = [...tp.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch) flight.throttle = Math.max(-3, Math.min(4, flight.throttle + Math.log10(d / pinch) * 2.5)); pinch = d; }
+    if (Math.hypot(t.x - t.x0, t.y - t.y0) > SLOP) t.moved = true;
+    if (tp.size === 2) {
+      const [a, b] = [...tp.values()], d = Math.hypot(a.x - b.x, a.y - b.y), ang = Math.atan2(b.y - a.y, b.x - a.x), my = (a.y + b.y) / 2;
+      if (pinch) {
+        let da = ang - twist; if (da > Math.PI) da -= 2 * Math.PI; else if (da < -Math.PI) da += 2 * Math.PI;
+        rotateLocal(2, -da);                                                                    // twist: roll with the fingers
+        flight.throttle = Math.max(-3, Math.min(4, flight.throttle + Math.log10(d / pinch) * 2.5 + (midY - my) / innerHeight * 5));   // pinch or drag: speed
+      }
+      pinch = d; twist = ang; midY = my;
+    }
   });
-  const up = (e) => { const t = tp.get(e.pointerId); if (!t) return; tp.delete(e.pointerId); pinch = 0; if (performance.now() - downT < 220 && Math.hypot(t.x - t.x0, t.y - t.y0) < 12) { const now = performance.now(), dbl = now - lastTap < 380; lastTap = dbl ? 0 : now; flight.tapX = t.x; flight.tapY = t.y; onAction(dbl ? 'DoubleTap' : 'Tap'); } };
+  const up = (e) => {
+    const t = tp.get(e.pointerId); if (!t) return;
+    tp.delete(e.pointerId); pinch = 0; clearTimeout(holdTimer);
+    if (!two && !flight.menu && performance.now() - downT < 220 && !t.moved) { const now = performance.now(), dbl = now - lastTap < 380; lastTap = dbl ? 0 : now; flight.tapX = t.x; flight.tapY = t.y; onAction(dbl ? 'DoubleTap' : 'Tap'); }
+    if (!tp.size) two = false;
+  };
   canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
   touch = tp;
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); flight.throttle = Math.max(-3, Math.min(4, flight.throttle - Math.sign(e.deltaY) * 0.1)); }, { passive: false });
@@ -70,7 +90,8 @@ export function updateFlight(dt) {
   let tz = 0;
   if (touch.size === 1) {
     const t = touch.values().next().value, k = 2.2 / Math.min(innerWidth, innerHeight);
-    rotateLocal(1, -(t.x - t.x0) * k * dt * 1.6); rotateLocal(0, -(t.y - t.y0) * k * dt * 1.6); basis(); tz = 1;
+    // a finger resting where it landed does nothing for a moment (it may be a tap, or a hold on a target)
+    if (!flight.menu && (t.moved || performance.now() - t.t > 520)) { rotateLocal(1, -(t.x - t.x0) * k * dt * 1.6); rotateLocal(0, -(t.y - t.y0) * k * dt * 1.6); basis(); tz = 1; }
   }
   const mx = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0), my = (keys.has('KeyR') ? 1 : 0) - (keys.has('KeyF') ? 1 : 0), mz = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) + tz;
   if (go.on && (mx || my || mz)) cancelGoto();

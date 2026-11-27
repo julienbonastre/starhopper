@@ -23,7 +23,7 @@ Rendered with WebGPU and no engine. Everything on screen is either a public cata
 | `P` | hide all procedural fill: measured data only |
 | `M`, `H`, `Tab`, `Esc` | sound, frame statistics, hide the panel, menu |
 
-On a phone: hold one finger to fly and slide it to steer, pinch for speed, tap to target, double tap to fly there. The menu has search, the viewpoints, named save points (kept in your browser), the detail level and the data credits.
+On a phone or tablet: slide one finger to steer and fly; with two fingers, twist to roll and drag up or down (or pinch) for speed; tap to target, double tap to fly there, and hold on something for a small go-to menu. The menu has search, the viewpoints, named save points (kept in your browser), the detail level and the data credits.
 
 ## What is real and what is filled in
 

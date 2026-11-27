@@ -50,6 +50,12 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 #foot { margin-top: 16px; font-size: 11px; color: var(--dim); } #foot a { color: inherit; }
 #menu { position: fixed; top: max(10px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); padding: 8px 12px; display: none; z-index: 4; backdrop-filter: blur(4px); }
 @media (pointer: coarse) { body.fly #menu { display: block; } #kd { display: none; } }
+#ctx { position: fixed; z-index: 6; min-width: 170px; padding: 10px 12px; background: #06080ce0; border: 1px solid #ffffff22; border-radius: 12px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+#ctxn { margin-bottom: 8px; font-size: 13px; color: var(--acc); }
+#ctx button { appearance: none; font: inherit; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--fg); background: #ffffff14; border: 0; border-radius: 999px; padding: 9px 14px; margin-right: 6px; }
+#ctx #ctxgo { color: #000; background: var(--fg); }
+#tk { display: none; margin-top: 14px; font-size: 12px; color: var(--dim); line-height: 1.7; }
+@media (pointer: coarse) { #tk { display: block; } }
 #turn { display: none; position: fixed; inset: 0; z-index: 9; background: #000; place-items: center; text-align: center; letter-spacing: .22em; text-transform: uppercase; font-size: 12px; color: var(--dim); }
 @media (pointer: coarse) and (orientation: portrait) { #turn { display: grid; } }
 </style>
@@ -61,6 +67,7 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 <div id="perf" hidden></div>
 <button id="menu" aria-label="Menu">&#8801;</button>
 <div id="turn">Turn your phone sideways</div>
+<div id="ctx" hidden><div id="ctxn"></div><button id="ctxgo">Fly here</button><button id="ctxno">Not now</button></div>
 <div id="veil"><div id="card">
 <h1>Starhopper</h1>
 <div id="tag">The universe, as code</div>
@@ -71,6 +78,7 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 <kbd>W A S D</kbd><span>fly</span><kbd>Mouse</kbd><span>look</span><kbd>R / F</kbd><span>up / down</span><kbd>Q / E</kbd><span>roll</span>
 <kbd>Wheel</kbd><span>throttle</span><kbd>Shift / Ctrl</kbd><span>&times;10 / &divide;10</span><kbd>Click</kbd><span>target what you look at</span><kbd>G</kbd><span>fly to the target</span><kbd>1 &ndash; 8</kbd><span>viewpoints</span><kbd>Home</kbd><span>back to Earth</span><kbd>L N X P</kbd><span>lines, names, exoplanet hosts, fill</span><kbd>M</kbd><span>sound</span><kbd>[ ]</kbd><span>exposure</span><kbd>Tab / H</kbd><span>hide panel / frame stats</span><kbd>Esc</kbd><span>this menu</span>
 </div></details>
+<div id="tk">One finger: slide to steer and fly &middot; Two fingers: twist to roll, drag up or down for speed<br>Tap: target &middot; Double tap: fly there &middot; Hold: go-to menu</div>
 <input id="find" type="search" placeholder="Fly to a star, planet, nebula or galaxy: Vega, Saturn, M 42, Andromeda ..." autocomplete="off" spellcheck="false">
 <div id="tg"><button data-k="lines">Constellations</button><button data-k="names">Names</button><button data-k="proc" class="on">Procedural fill</button><button data-k="exo">Exoplanet hosts</button><button data-k="sound">Sound</button></div>
 <div id="vp"></div>
