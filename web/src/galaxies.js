@@ -72,9 +72,9 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32, t: f32, foot: f32) -> vec4f 
   if (disc < 1e-4 && bul < 1e-4) { return vec4f(0.0); }
   let th = atan2(q.y, q.x) * p.wind;
   var n1 = 0.5; var n2 = 0.5; var nf = 0.5; var wob = 0.0;
-  // real arms are not ruled spirals: a slow wander in phase bends, forks and breaks them (two lattices, turned
-  // against each other, so the wander has no corners)
-  if (detail > 0.0) { wob = (vnoise(vec3f(q.xy * 2.7, 0.37) + sd * 1.3) + vnoise(vec3f(q.x * 1.9 + q.y * 1.6, q.y * 1.9 - q.x * 1.6, 0.81) + sd * 0.7) - 1.0) * 2.1 * detail; }
+  // real arms are not ruled spirals: a slow wander in phase bends, forks and breaks them (on a lattice turned
+  // away from the axes)
+  if (detail > 0.0) { wob = (vnoise(vec3f(q.x * 1.9 + q.y * 1.6, q.y * 1.9 - q.x * 1.6, 0.37) + sd * 1.3) - 0.5) * 3.0 * detail; }
   let ph = p.arms * (th - log(max(r, 0.02)) * p.pitch) + p.phase + wob;
   let c = 0.5 + 0.5 * cos(ph);
   let c2 = 0.5 + 0.5 * cos(2.0 * ph + 1.3 - wob * 1.6);          // spurs and secondary arms at twice the count

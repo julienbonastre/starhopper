@@ -247,7 +247,7 @@ async function main() {
   const ts = gpu.hasTS ? { set: device.createQuerySet({ type: 'timestamp', count: 2 }), resolve: device.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }), read: device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), busy: false } : null;
   const tsBegin = ts && { querySet: ts.set, beginningOfPassWriteIndex: 0 }, tsEnd = ts && { querySet: ts.set, endOfPassWriteIndex: 1 };
   const gpuFail = () => { ts.busy = false; };
-  const gpuDone = () => { const a = new BigInt64Array(ts.read.getMappedRange()); const ms = Number(a[1] - a[0]) / 1e6; ts.read.unmap(); ts.busy = false; if (ms > 0 && ms < 500) { gpuMs += (ms - gpuMs) * 0.1; if (bench) bench.gpu.push(ms); } };
+  const gpuDone = () => { const a = new BigInt64Array(ts.read.getMappedRange()); const ms = Number(a[1] - a[0]) / 1e6; ts.read.unmap(); ts.busy = false; if (ms > 0 && ms < 500) { gpuMs += (ms - gpuMs) * 0.1; if (bench) { bench.gpu.push(ms); bench.at.push(performance.now()); } } };
   let gpuMs = 0, frameMs = 8, bench = null, scaleT = 0, period = 1 / 30, dtK = 0, winN = 0, winLate = 0, holdT = 0, hold = 6, calm = 0, adaptMag = 0;
   let last = performance.now(), time = 0, frames = 0, fpsT = 0, fps = 0, cpuMs = 0;
   const dts = new Float32Array(128), dtSort = new Float32Array(128);
@@ -379,7 +379,7 @@ async function main() {
       // Only ever revised downward, so a slow spell is not mistaken for a slower display.
       if (dtK >= 128) { dtSort.set(dts); dtSort.sort(); if (dtSort[64] < period) period = dtSort[64]; }
       if (!gpu.offscreen && !params.has('fixed')) {
-        if (late > 0.08 && gpuMs > budget * 0.55 && (resScale > 0.45 || adaptMag > -2)) {
+        if (late > 0.04 && gpuMs > budget * 0.55 && (resScale > 0.45 || adaptMag > -2)) {
           // resolution first; once that is as low as it goes, fewer (fainter) stars, a quarter magnitude at a time
           if (resScale > 0.6 || adaptMag <= -2) { resScale = Math.max(0.45, resScale * 0.9); resize(); } else adaptMag -= 0.25;
           holdT = hold; hold = Math.min(60, hold * 2); calm = 0;
@@ -421,9 +421,9 @@ async function main() {
   const runBench = async (secs = 11) => {
     const stat = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? { avg: +(s.reduce((x, y) => x + y, 0) / s.length).toFixed(2), p99: +s[Math.floor(s.length * 0.99)].toFixed(2), max: +s[s.length - 1].toFixed(2), n: s.length } : null; };
     setPose(0); state.snap = 1; await new Promise((r) => setTimeout(r, 1500));
-    bench = { frame: [], gpu: [] };
+    bench = { frame: [], gpu: [], at: [] };
     const legs = [];
-    for (let i = 1; i <= POSES.length; i++) { const p = POSES[i % POSES.length], g0 = bench.gpu.length; flyPose(i % POSES.length, secs); await new Promise((r) => setTimeout(r, secs * 1000 + 300)); const g = bench.gpu.slice(g0); legs.push({ to: p.name, avg: +(g.reduce((x, y) => x + y, 0) / Math.max(1, g.length)).toFixed(2), max: +Math.max(0, ...g).toFixed(2), over: g.filter((x) => x > 8.3).length }); }
+    for (let i = 1; i <= POSES.length; i++) { const p = POSES[i % POSES.length], g0 = bench.gpu.length, t0 = performance.now(); flyPose(i % POSES.length, secs); await new Promise((r) => setTimeout(r, secs * 1000 + 300)); const g = bench.gpu.slice(g0); legs.push({ to: p.name, avg: +(g.reduce((x, y) => x + y, 0) / Math.max(1, g.length)).toFixed(2), max: +Math.max(0, ...g).toFixed(2), maxAt: +((bench.at[g0 + g.indexOf(Math.max(0, ...g))] - t0) / 1000).toFixed(2), over: g.filter((x) => x > 8.3).length }); }
     const b = bench; bench = null;
     const budget = period * 1000;
     return { frameMs: stat(b.frame), gpuMs: stat(b.gpu), late: b.frame.filter((x) => x > budget * 1.6).length, gpuOver: b.gpu.filter((x) => x > 8.3).length, legs, size: [W, H], scale: resScale, level: LEVEL, mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null };
