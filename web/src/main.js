@@ -132,11 +132,11 @@ async function main() {
   const E_THRESH = 0.0035 * 2 * Math.PI * 0.62 * 0.62;   // energy at which a star is culled (see stars.js)
   const E_MAX = 2 * Math.PI * 2.6 * 26 * 26;             // energy at which a star sprite stops growing
 
-  initInput(canvas, (code) => {
+  initInput(canvas, (code, shifted) => {
     if (code === 'KeyH') { showPerf = !showPerf; $('perf').hidden = !showPerf; }
     else if (code === 'Home' || code === 'Digit0') going = bodyRow[3], flyTo(bodies.pos(3, 0), bodies.pos(3, 1), bodies.pos(3, 2), bodies.radius(3) * 4, 6);
     else if (code === 'KeyO') { setLock(!flight.lock); if (target.on) flash(flight.lock ? 'Locked on to ' + target.name : 'Lock released'); }
-    else if (code === 'Comma') setRate(rateI - 1); else if (code === 'Period') setRate(rateI + 1); else if (code === 'Slash') clockNow(); else if (code === 'KeyT') setRate(rateI === PAUSE ? lastRun : PAUSE);
+    else if (code === 'Comma') stepRate(-1, shifted); else if (code === 'Period') stepRate(1, shifted); else if (code === 'Slash') clockNow(); else if (code === 'KeyT') togglePause();
     else if (code === 'KeyI') { if (target.on) showInfo(!$('info').classList.contains('on')); }
     else if (code === 'KeyG') { if (target.on) { (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9)); flash(target.name); } }
     else if (code === 'Touch') $('ctx').hidden = true;
@@ -328,21 +328,29 @@ async function main() {
   $('tblk').onclick = () => { setLock(!flight.lock); flash(flight.lock ? 'Locked on to ' + target.name : 'Lock released'); };
   // The clock. It starts at the present, running at the true rate; the buttons step through faster rates (and
   // backwards), pause it, or bring it back to now. Only the Sun's family moves: the stars are too far to show it.
-  const RATES = [-31557600, -2592000, -86400, -3600, 0, 1, 60, 3600, 86400, 2592000, 31557600];   // seconds of the clock per second
-  const RATE_NAME = ['\u22121 year/s', '\u22121 month/s', '\u22121 day/s', '\u22121 hour/s', 'paused', 'real time', '1 min/s', '1 hour/s', '1 day/s', '1 month/s', '1 year/s'], PAUSE = 4;
-  let simJd = jd, rateI = 5, lastRun = 5, clockShown = '', clockAt = 0;
-  function setRate(i) { rateI = Math.max(0, Math.min(RATES.length - 1, i)); if (rateI !== PAUSE) lastRun = rateI; $('tcr').textContent = RATE_NAME[rateI]; $('tcp').innerHTML = rateI === PAUSE ? '&#9654;' : '&#10074;&#10074;'; }
-  $('tcs').onclick = () => setRate(rateI - 1); $('tcf').onclick = () => setRate(rateI + 1); $('tcp').onclick = () => setRate(rateI === PAUSE ? lastRun : PAUSE);
-  const clockNow = () => { simJd = jdNow(); setRate(5); clockAt = 0; flash('The present'); };
+  // Rates, in seconds of the clock per second. The single arrows go one small step along the whole ladder (through
+  // zero into reverse); the double arrows jump to the next whole unit (second, minute, hour, day, month, year).
+  const MAG = [1, 10, 60, 300, 900, 3600, 10800, 21600, 43200, 86400, 259200, 604800, 1209600, 2592000, 7776000, 15552000, 31557600];
+  const MAG_NAME = ['real time', '10 s/s', '1 min/s', '5 min/s', '15 min/s', '1 hour/s', '3 hours/s', '6 hours/s', '12 hours/s', '1 day/s', '3 days/s', '1 week/s', '2 weeks/s', '1 month/s', '3 months/s', '6 months/s', '1 year/s'];
+  const UNIT = new Set([1, 60, 3600, 86400, 2592000, 31557600]);
+  const RATES = [...MAG.map((m) => -m).reverse(), ...MAG], REAL = MAG.length, PAUSE = -1;
+  const rateName = (i) => (i === PAUSE ? 'paused' : i >= REAL ? MAG_NAME[i - REAL] : i === REAL - 1 ? 'real time, backwards' : '\u2212' + MAG_NAME[REAL - 1 - i]);
+  let simJd = jd, rateI = REAL, lastRun = REAL, clockShown = '', clockAt = 0;
+  function setRate(i) { rateI = i === PAUSE ? PAUSE : Math.max(0, Math.min(RATES.length - 1, i)); if (rateI !== PAUSE) lastRun = rateI; $('tcr').textContent = rateName(rateI); $('tcp').innerHTML = rateI === PAUSE ? '&#9654;' : '&#10074;&#10074;'; }
+  // a step from paused starts from the rate it was paused at
+  const stepRate = (d, unit) => { let i = (rateI === PAUSE ? lastRun : rateI) + d; if (unit) while (i > 0 && i < RATES.length - 1 && !UNIT.has(Math.abs(RATES[i]))) i += d; setRate(i); };
+  const togglePause = () => setRate(rateI === PAUSE ? lastRun : PAUSE);
+  $('tcs').onclick = () => stepRate(-1, false); $('tcf').onclick = () => stepRate(1, false); $('tcss').onclick = () => stepRate(-1, true); $('tcff').onclick = () => stepRate(1, true); $('tcp').onclick = togglePause;
+  const clockNow = () => { simJd = jdNow(); setRate(REAL); clockAt = 0; flash('The present'); };
   $('tcn').onclick = clockNow;
-  setRate(5);
+  setRate(REAL);
   // The clock keeps its own time: the flight's step is capped at a tenth of a second, which would run the clock
   // slow on a slow machine. Real time counts every second that passed, hidden tab included; the fast rates count
   // at most one second per frame, so that coming back to the tab does not skip centuries.
   function tick(now) {
     const el = clockAt ? (now - clockAt) / 1000 : 0; clockAt = now;
     if (rateI === PAUSE || state.frozen) return;
-    simJd += (rateI === 5 ? el : Math.min(el, 1)) * RATES[rateI] / 86400;
+    simJd += (rateI === REAL ? el : Math.min(el, 1)) * RATES[rateI] / 86400;
     const cx = cam.p[0], cy = cam.p[1], cz = cam.p[2];
     bodies.setTime(simJd); nightStale = true;
     rode[0] += cam.p[0] - cx; rode[1] += cam.p[1] - cy; rode[2] += cam.p[2] - cz;   // carried by a planet: not the camera's own travel

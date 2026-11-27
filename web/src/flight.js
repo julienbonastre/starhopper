@@ -27,7 +27,7 @@ export function initInput(canvas, onAction) {
   addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT') return;
     if (e.code === 'Tab' || e.code === 'Space') e.preventDefault();
-    if (!e.repeat) onAction(e.code);
+    if (!e.repeat) onAction(e.code, e.shiftKey);
     keys.add(e.code);
   });
   addEventListener('keyup', (e) => keys.delete(e.code));
