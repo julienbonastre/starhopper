@@ -28,7 +28,7 @@ export const KIND = {
   con: { font: '500 10.5px', colour: [0.45, 0.60, 0.95], dx: 0, dy: -8, upper: true, spacing: '0.22em', centre: true },
   body: { font: '500 12px', colour: [1.0, 0.92, 0.78], dx: 9, dy: -9, upper: false, spacing: '0.02em' },
   deep: { font: '500 11.5px', colour: [0.86, 0.80, 1.0], dx: 10, dy: -9, upper: false, spacing: '0.03em' },
-  galaxy: { font: '500 11.5px', colour: [0.98, 0.84, 0.88], dx: 10, dy: -9, upper: false, spacing: '0.03em' },
+  galaxy: { font: '500 11.5px', colour: [0.98, 0.84, 0.88], dx: 0, dy: 16, upper: false, spacing: '0.03em', centre: true },
 };
 
 export function initLabels(gpu, globalsBuf, getScale) {
@@ -92,13 +92,13 @@ export function initLabels(gpu, globalsBuf, getScale) {
       const m = it.absmag === it.absmag ? it.absmag + 5 * Math.log10(Math.max(d, 1e-9) / 10) : it.rank;
       if (m > magLimit[it.kind]) continue;
       const nx = (dx * cam.right[0] + dy * cam.right[1] + dz * cam.right[2]) * f / asp / vz, ny = (dx * cam.up[0] + dy * cam.up[1] + dz * cam.up[2]) * f / vz;
-      if (Math.abs(nx) > 0.98 || Math.abs(ny) > 0.96) continue;
+      if (Math.abs(nx) > 0.98 || Math.abs(ny) > 0.94 || (nx * 0.5 + 0.5) * W + (it.text.length * 7.5 + 14) * pxScale > W) continue;
       it.sx = (nx * 0.5 + 0.5) * W; it.sy = (0.5 - ny * 0.5) * H;
       cand[nCand] = i; candScore[nCand] = m - (it.slot >= 0 ? 0.6 : 0); nCand++;   // a label already showing is a little sticky
     }
     // take the best, skipping any that would overlap one already taken (coarse occupancy grid)
     grid.fill(0); slotWant.fill(0);
-    const cw = 150 * pxScale, chh = 22 * pxScale, gw = Math.min(64, Math.ceil(W / cw)), gh = Math.min(64, Math.ceil(H / chh));
+    const cw = 110 * pxScale, chh = 20 * pxScale, gw = Math.min(64, Math.ceil(W / cw)), gh = Math.min(64, Math.ceil(H / chh));
     let taken = 0;
     while (taken < SLOTS - 8) {
       let best = -1, bs = Infinity;
@@ -106,8 +106,11 @@ export function initLabels(gpu, globalsBuf, getScale) {
       if (best < 0) break;
       candScore[best] = Infinity;
       const it = items[cand[best]], gx = Math.min(gw - 1, Math.floor(it.sx / cw)), gy = Math.min(gh - 1, Math.floor(it.sy / chh));
-      if (grid[gy * 64 + gx] || (gx + 1 < gw && grid[gy * 64 + gx + 1] === 2)) continue;
-      grid[gy * 64 + gx] = 2; if (gx + 1 < gw) grid[gy * 64 + gx + 1] = Math.max(1, grid[gy * 64 + gx + 1]);
+      // a label covers its own cell and the next two to the right; refuse if any of those, or the rows touching them, are taken
+      let clash = 0;
+      for (let yy = Math.max(0, gy - 1); yy <= Math.min(gh - 1, gy + 1); yy++) for (let xx = Math.max(0, gx - 2); xx <= Math.min(gw - 1, gx + 2); xx++) clash |= grid[yy * 64 + xx];
+      if (clash) continue;
+      grid[gy * 64 + gx] = 1;
       it.vis = 1; taken++;
       if (it.slot < 0) {
         // find a free slot (one whose label has fully faded)
@@ -131,7 +134,7 @@ export function initLabels(gpu, globalsBuf, getScale) {
       const sx = ((dx * cam.right[0] + dy * cam.right[1] + dz * cam.right[2]) * f / asp / vz * 0.5 + 0.5) * W, sy = (0.5 - (dx * cam.up[0] + dy * cam.up[1] + dz * cam.up[2]) * f / vz * 0.5) * H;
       const o = live * 12, w = slotW[s] * pxScale, h = SH * pxScale;
       out[o] = Math.round(sx + (k.centre ? -w / 2 : k.dx * pxScale)); out[o + 1] = Math.round(sy + k.dy * pxScale - h / 2); out[o + 2] = w; out[o + 3] = h;
-      out[o + 4] = k.colour[0]; out[o + 5] = k.colour[1]; out[o + 6] = k.colour[2]; out[o + 7] = slotAlpha[s] * kindGain[it.kind] * 0.85;
+      out[o + 4] = k.colour[0]; out[o + 5] = k.colour[1]; out[o + 6] = k.colour[2]; out[o + 7] = slotAlpha[s] * kindGain[it.kind] * 0.6;
       out[o + 8] = (s % COLS) / COLS; out[o + 9] = Math.floor(s / COLS) / (SLOTS / COLS); out[o + 10] = slotW[s] / (SW * COLS); out[o + 11] = 1 / (SLOTS / COLS);
       live++;
     }

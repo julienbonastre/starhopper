@@ -39,6 +39,7 @@ const FINAL = FS_TRI + /*wgsl*/`
 fn hash(p: vec2f) -> f32 { var q = fract(vec3f(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 @fragment fn fs(i: VO) -> @location(0) vec4f {
   var c = textureSampleLevel(src, smp, i.uv, 0.0).rgb + textureSampleLevel(bloom, smp, i.uv, 0.0).rgb * P.x;
+  c = c * c / (c + 0.010);                  // toe: keeps the sky black under the faint diffuse light
   c = 1.0 - exp(-c);                        // filmic shoulder: bright cores go to white, colours stay in the skirts
   c = pow(c, vec3f(1.0 / 2.2));
   let n = hash(i.pos.xy + fract(P.y) * 61.0) + hash(i.pos.yx + 17.0 + fract(P.y) * 37.0) - 1.0; // triangular dither against banding

@@ -10,13 +10,13 @@ struct GalP { fb: f32, rb: f32, h: f32, hz: f32, pitch: f32, arms: f32, armC: f3
 // Hubble sequence: 0 E, 1 S0, 2 Sa, 3 Sab, 4 Sb, 5 Sbc, 6 Sc, 7 Scd, 8 Sd/Sm, 9 Irr
 const FB = array<f32, 10>(1.0, 0.55, 0.42, 0.34, 0.26, 0.18, 0.12, 0.08, 0.04, 0.0);
 const PITCH = array<f32, 10>(9.0, 9.0, 9.0, 11.0, 14.0, 17.0, 20.0, 24.0, 28.0, 30.0);
-const ARMC = array<f32, 10>(0.0, 0.0, 0.5, 0.6, 0.72, 0.8, 0.88, 0.9, 0.9, 0.0);
-const CLUMP = array<f32, 10>(0.0, 0.0, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 1.0);
+const ARMC = array<f32, 10>(0.0, 0.0, 0.5, 0.6, 0.72, 0.8, 0.85, 0.7, 0.3, 0.0);
+const CLUMP = array<f32, 10>(0.0, 0.0, 0.15, 0.2, 0.3, 0.4, 0.5, 0.65, 0.9, 1.0);
 fn galParams(t: u32, flat: f32, seed: u32) -> GalP {
   let b = min(t & 15u, 9u);
   var p: GalP;
   p.fb = FB[b]; p.armC = ARMC[b]; p.clump = CLUMP[b];
-  p.rb = select(0.045 + 0.12 * p.fb, 0.12, b == 0u);
+  p.rb = select(0.045 + 0.12 * p.fb, 0.17, b == 0u);
   p.h = 0.27; p.hz = select(0.022, 0.1, b == 9u); if (b == 1u) { p.hz = 0.035; }
   p.pitch = 1.0 / tan(radians(PITCH[b]));
   p.arms = select(2.0, 4.0, ((seed >> 3u) & 3u) == 0u && b >= 5u);
@@ -46,7 +46,7 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32) -> vec4f {
   let bul = p.fb / (9.8696 * p.qz * p.rb * p.rb * p.rb) * pow(1.0 + s2 / (p.rb * p.rb), -2.0) * smoothstep(1.7, 1.0, sqrt(s2));
   if (p.fb >= 0.999) { return vec4f(OLD * bul, 0.0); }
   let az = abs(q.z);
-  let disc = (1.0 - p.fb) / (12.566 * p.h * p.h * p.hz) * exp(-r / p.h - az / p.hz) * smoothstep(1.6, 1.15, r);
+  let disc = (1.0 - p.fb) / (12.566 * p.h * p.h * p.hz) * exp(-r / p.h - az / p.hz) * smoothstep(1.65, 0.85, r);
   if (disc < 1e-4 && bul < 1e-4) { return vec4f(0.0); }
   let th = atan2(q.y, q.x) * p.wind;
   let ph = p.arms * (th - log(max(r, 0.02)) * p.pitch) + p.phase;
@@ -55,9 +55,11 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32) -> vec4f {
   let arm = c * c * c * 3.2;                                   // mean 1 around the circle
   var n1 = 0.5; var n2 = 0.0;
   if (detail > 0.0) {
-    let w = q * vec3f(15.0, 15.0, 40.0) + sd;
-    n1 = vnoise(w) * 0.65 + vnoise(w * 2.7 + 9.1) * 0.35;
-    n2 = vnoise(w * 4.3 + 31.7);
+    // each octave is rotated against the last, so the noise lattice never lines up into a visible weave
+    let w = vec3f(q.x * 0.8 - q.y * 0.6, q.x * 0.6 + q.y * 0.8, q.z) * vec3f(13.0, 13.0, 36.0) + sd;
+    let w2 = vec3f(w.x * 0.54 + w.y * 0.84, -w.x * 0.84 + w.y * 0.54, w.z) * 2.3 + 9.1;
+    n1 = vnoise(w) * 0.6 + vnoise(w2) * 0.4;
+    n2 = vnoise(vec3f(w2.x * 0.7 - w2.y * 0.71, w2.x * 0.71 + w2.y * 0.7, w2.z) * 1.9 + 31.7);
   }
   let clumps = mix(1.0, 0.25 + 1.5 * n1, p.clump * (0.5 + 0.5 * detail));
   let discE = disc * mix(1.0, arm, p.armC * inner) * clumps;
@@ -73,6 +75,81 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32) -> vec4f {
   return vec4f(col, dust);
 }
 `;
+
+
+// Procedural fill stars: where no catalogue reaches, individual stars are drawn from the host galaxy's own light
+// model. They live on world-anchored lattices (one per luminosity class), so the same stars are always in the same
+// place; each lattice is only as wide as its class can be seen. Inside the Milky Way a star is dropped wherever the
+// real catalogue is complete (it would be brighter than magnitude 10.5 from the Sun).
+const FILL = /*wgsl*/`
+${GLOBALS}
+${MODEL}
+struct Vol { c: vec3f, R: f32, ax: vec3f, lum: f32, ay: vec3f, flat: f32, n: vec3f, weight: f32, id: vec4u }
+struct Vols { v: array<Vol, 4>, steps: f32, count: f32, kappa: f32, pad: f32 }
+@group(0) @binding(1) var<uniform> V: Vols;
+struct Fill { cell: vec3i, n: i32, frac: vec3f, size: f32, sun: vec3f, mag: f32, per: u32, level: u32, expect: f32, gain: f32, host: u32, isMW: u32, p0: u32, p1: u32 }
+@group(1) @binding(0) var<uniform> F: Fill;
+struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f, @location(1) col: vec3f, @location(2) prm: vec2f }
+fn pcg3(v: vec3u) -> vec3u {
+  var x = v * 1664525u + 1013904223u;
+  x.x += x.y * x.z; x.y += x.z * x.x; x.z += x.x * x.y; x ^= x >> vec3u(16u);
+  x.x += x.y * x.z; x.y += x.z * x.x; x.z += x.x * x.y; return x;
+}
+fn bvColour(bv: f32) -> vec3f {
+  let t = 4600.0 * (1.0 / (0.92 * bv + 1.7) + 1.0 / (0.92 * bv + 0.62)); let x = t / 100.0;
+  var c: vec3f;
+  if (x <= 66.0) { c.r = 1.0; c.g = clamp(0.390082 * log(x) - 0.631841, 0.0, 1.0); }
+  else { c.r = clamp(1.292936 * pow(x - 60.0, -0.1332047), 0.0, 1.0); c.g = clamp(1.129891 * pow(x - 60.0, -0.0755148), 0.0, 1.0); }
+  if (x >= 66.0) { c.b = 1.0; } else if (x <= 19.0) { c.b = 0.0; } else { c.b = clamp(0.543207 * log(x - 10.0) - 1.196254, 0.0, 1.0); }
+  c = pow(c, vec3f(2.2));
+  return mix(vec3f(1.0), c / dot(c, vec3f(0.2126, 0.7152, 0.0722)), 1.25);
+}
+@vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VO {
+  var o: VO; o.pos = vec4f(0.0, 0.0, 2.0, 1.0);
+  let corner = vec2f(f32(vi & 1u) * 2.0 - 1.0, f32(vi >> 1u) * 2.0 - 1.0);
+  let ci = ii / F.per; let n = u32(F.n);
+  let g = vec3i(i32(ci % n), i32((ci / n) % n), i32(ci / (n * n))) - F.n / 2;
+  let wc = F.cell + g;
+  let h = pcg3(bitcast<vec3u>(wc) + vec3u(ii % F.per, F.level * 7919u, 0u));
+  let h2 = pcg3(h);
+  let u1 = vec3f(h) / 4294967296.0; let u2 = vec3f(h2) / 4294967296.0;
+  let rel = (vec3f(g) + u1 - F.frac) * F.size;
+  // local density of the host galaxy, relative to the solar neighbourhood
+  let v = V.v[F.host];
+  let P = galParams(v.id.x, v.flat, v.id.y);
+  let w = rel - v.c;
+  let e = galEmit(vec3f(dot(w, v.ax), dot(w, v.ay), dot(w, v.n)) / v.R, P, 0.0, 0.0);
+  let rho = dot(e.rgb, vec3f(0.33)) * v.lum / v.R / 0.02296;
+  if (u2.x >= F.expect * rho) { return o; }
+  var absmag = F.mag + (u2.y - 0.5) * 3.0;
+  // colour: main sequence, with red giants among the brighter classes and a blue excess in the arms
+  var bv = clamp(0.15 * absmag - 0.05, -0.28, 1.5);
+  if (absmag < 2.5 && u2.z < 0.4) { bv = 0.95 + 0.5 * u1.x; }
+  let d2 = max(dot(rel, rel), 1e-12);
+  var gain = F.gain * smoothstep(1.0, 0.8, max(abs(f32(g.x)), max(abs(f32(g.y)), abs(f32(g.z)))) / f32(F.n / 2));
+  if (F.isMW == 1u) {
+    let ds = rel - F.sun; let m = absmag + 2.5 * log(max(dot(ds, ds), 1e-6)) / 2.302585 - 5.0;   // magnitude seen from the Sun
+    gain *= smoothstep(10.0, 11.0, m);
+  }
+  let en = G.exposure * gain * G.proc * exp(-0.9210340 * absmag) * 100.0 / d2;
+  let s0 = 0.62 * G.pxScale;
+  let sigma = min(max(s0, sqrt(en * G.pxScale * G.pxScale / (6.2831853 * 2.6))), 26.0 * G.pxScale);
+  let peak = min(en * G.pxScale * G.pxScale / (6.2831853 * sigma * sigma), 40.0);
+  let p = project(rel);
+  if (peak < 0.0035 || p.z > 1.0) { return o; }
+  let half = sigma * 3.6 + 1.0;
+  o.pos = vec4f(p.xy + corner * half * 2.0 / G.viewport, 0.5, 1.0);
+  o.uv = corner * half; o.col = bvColour(bv); o.prm = vec2f(peak, sigma);
+  return o;
+}
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  let r2 = dot(i.uv, i.uv) / (i.prm.y * i.prm.y);
+  let skirt = 0.035 / (1.0 + r2 * r2 * 0.08) * max(0.0, 1.0 - r2 / 12.96) * smoothstep(1.2, 3.0, i.prm.y / G.pxScale);
+  return vec4f(i.col * i.prm.x * (exp(-0.5 * r2) + skirt), 1.0);
+}`;
+// luminosity classes: absolute magnitude, cell size (pc), stars per cell, and stars expected per slot near the Sun
+// (from the solar-neighbourhood luminosity function: about 8e-3, 2.5e-3, 1.4e-4 and 4e-6 stars per cubic parsec)
+const CLASSES = [{ mag: 5, size: 2.2, per: 1, dens: 8e-3 }, { mag: 2, size: 8, per: 2, dens: 2.5e-3 }, { mag: -1, size: 32, per: 4, dens: 1.4e-4 }, { mag: -4, size: 130, per: 6, dens: 4e-6 }];
 
 const LAYER = /*wgsl*/`
 struct Layer { camQ: vec3i, pad0: i32, camF: vec3f, step: f32, far: vec3f, magOff: f32, sigma0: f32, gain: f32, vol: vec4i }
@@ -250,7 +327,7 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
   const layerBuf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const lBind = device.createBindGroup({ layout: ll, entries: [{ binding: 0, resource: { buffer: layerBuf } }] });
 
-  const vl = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: {} }] });
+  const vl = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, { binding: 1, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }] });
   const vm = device.createShaderModule({ code: VOLUME });
   const volume = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [vl] }), vertex: { module: vm, entryPoint: 'vs' }, fragment: { module: vm, entryPoint: 'fs', targets: [{ format: HDR }] } });
   const volData = new ArrayBuffer(4 * 80 + 16), vf = new Float32Array(volData), vu = new Uint32Array(volData);
@@ -258,6 +335,15 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
   const vBind = device.createBindGroup({ layout: vl, entries: [{ binding: 0, resource: { buffer: globalsBuf } }, { binding: 1, resource: { buffer: volBuf } }] });
   const bm = device.createShaderModule({ code: BLIT });
   const blit = device.createRenderPipeline({ layout: 'auto', vertex: { module: bm, entryPoint: 'vs' }, fragment: { module: bm, entryPoint: 'fs', targets: [{ format: HDR, blend: add }] } });
+  const fl2 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {} }] });
+  const fm = device.createShaderModule({ code: FILL });
+  const fillPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [vl, fl2] }), vertex: { module: fm, entryPoint: 'vs' }, fragment: { module: fm, entryPoint: 'fs', targets: [{ format: HDR, blend: add }] }, primitive: { topology: 'triangle-strip' } });
+  const fills = CLASSES.map((c, level) => {
+    const data = new ArrayBuffer(80), buf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    return { c, level, data, f: new Float32Array(data), i: new Int32Array(data), buf, bind: device.createBindGroup({ layout: fl2, entries: [{ binding: 0, resource: { buffer: buf } }] }) };
+  });
+  const FN = quality.fillGrid;
+  let fillOn = false;
   const smp = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
   let volTex, volAttach, blitBind;
   function resize(w, h) {
@@ -271,10 +357,12 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
 
   // the (up to) four galaxies that loom largest: these are ray-marched
   const volId = new Int32Array(4).fill(-1), volSize = new Float64Array(4);
-  const near = { id: -1, dist: Infinity, edge: Infinity };       // nearest galaxy: for flight speed and the HUD
+  const near = { id: -1, dist: Infinity, edge: Infinity, spacing: Infinity };       // nearest galaxy: for flight speed and the HUD
   let nVol = 0;
   const pos = (i, a) => u[i * 10 + a] * STEP - HALF;
-  function update(W, H, pxScale, pointGain) {
+  let fillGain = 1;
+  function update(W, H, pxScale, pointGain, starGain) {
+    fillGain = starGain;
     const px = cam.p[0], py = cam.p[1], pz = cam.p[2], k = (1 / Math.tan(cam.fov / 2)) * (H / pxScale) * 0.5;
     volId.fill(-1); volSize.fill(0); near.dist = Infinity; near.edge = Infinity; near.id = -1;
     for (let i = 0; i < N; i++) {
@@ -305,13 +393,36 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
     }
     vf[80] = quality.volSteps; vf[81] = nVol; vf[82] = 34;
     queue.writeBuffer(volBuf, 0, volData);
+    // fill stars: hosted by the looming galaxy the camera is in or close to
+    let host = -1;
+    for (let s = 0, k = 0; s < 4; s++) { if (volId[s] < 0) continue; if (volId[s] === near.id && near.dist < 1.8 * f[near.id * 10 + 4]) host = k; k++; }
+    fillOn = host >= 0;
+    if (fillOn) for (const L of fills) {
+      const c = L.c.size;
+      for (let a = 0; a < 3; a++) { const g = cam.p[a] / c, q = Math.floor(g); L.i[a] = q; L.f[4 + a] = g - q; L.f[8 + a] = -cam.p[a]; }
+      L.i[3] = FN; L.f[7] = c; L.f[11] = L.c.mag;
+      L.i[12] = L.c.per; L.i[13] = L.level; L.f[14] = L.c.dens * c * c * c / L.c.per; L.f[15] = fillGain;
+      L.i[16] = host; L.i[17] = near.id === 0 ? 1 : 0;
+      queue.writeBuffer(L.buf, 0, L.data);
+    }
+    // typical distance between neighbouring fill stars here (for the flight model); Infinity outside galaxies
+    near.spacing = Infinity;
+    if (fillOn) {
+      const o = near.id * 10, R = f[o + 4], dx = px - pos(near.id, 0), dy = py - pos(near.id, 1), dz = pz - pos(near.id, 2);
+      const z = dx * f[o + 5] + dy * f[o + 6] + dz * f[o + 7], r = Math.sqrt(Math.max(0, dx * dx + dy * dy + dz * dz - z * z)) / R;
+      const base = (u[o + 3] >>> 8) & 15, fb = [1, 0.55, 0.42, 0.34, 0.26, 0.18, 0.12, 0.08, 0.04, 0][Math.min(base, 9)], hz = base === 9 ? 0.1 : base === 1 ? 0.035 : 0.022;
+      const disc = (1 - fb) / (12.566 * 0.0729 * hz) * Math.exp(-r / 0.27 - Math.abs(z / R) / hz);
+      const rb = base === 0 ? 0.12 : 0.045 + 0.12 * fb, s2 = r * r + (z / R) * (z / R) / 0.36, bul = fb / (9.8696 * 0.6 * rb * rb * rb) / ((1 + s2 / (rb * rb)) ** 2);
+      const rho = (disc + bul) * (Math.pow(10, -0.4 * ((u[o + 3] >>> 16) * 0.001 - 40)) * 100 / (R * R * R)) / 0.02296;
+      if (rho > 1e-6) near.spacing = Math.pow(0.012 * rho, -1 / 3);
+    }
     let inside = true;
     for (let a = 0; a < 3; a++) if (Math.abs(cam.p[a]) >= HALF) inside = false;
     for (let a = 0; a < 3; a++) {
       if (inside) { const g = (cam.p[a] + HALF) / STEP, q = Math.floor(g); li[a] = q; lf[4 + a] = g - q; lf[8 + a] = 0; }
       else { li[a] = 0; lf[4 + a] = 0; lf[8 + a] = -HALF - cam.p[a]; }
     }
-    lf[7] = STEP; lf[11] = 40; lf[12] = 0.8; lf[13] = pointGain;
+    lf[7] = STEP; lf[11] = 40; lf[12] = 1.0; lf[13] = pointGain;
     li[16] = volId[0]; li[17] = volId[1]; li[18] = volId[2]; li[19] = volId[3];
     queue.writeBuffer(layerBuf, 0, layerData);
   }
@@ -323,6 +434,7 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
   }
   function draw(pass, hadVol) {
     if (hadVol) { pass.setPipeline(blit); pass.setBindGroup(0, blitBind); pass.draw(3); }
+    if (fillOn) { pass.setPipeline(fillPipe); pass.setBindGroup(0, vBind); for (const L of fills) { pass.setBindGroup(1, L.bind); pass.draw(4, FN * FN * FN * L.c.per); } }
     pass.setPipeline(impostor); pass.setBindGroup(0, gBind); pass.setBindGroup(1, lBind); pass.setVertexBuffer(0, inst); pass.draw(4, N);
   }
   return { update, drawVolumes, draw, resize, near, normal: (i, a) => f[i * 10 + 5 + a], names: meta.names, count: N, pos, radius: (i) => f[i * 10 + 4], absmag: (i) => (u[i * 10 + 3] >>> 16) * 0.001 - 40 };

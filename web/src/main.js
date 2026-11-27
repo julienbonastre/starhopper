@@ -34,7 +34,7 @@ async function main() {
   say('Reading the star and galaxy indexes', 0.3);
   const [stars, galPts, gal] = await Promise.all([
     initPoints(gpu, globalsBuf, base + 'stars/', quality, { budget: quality.starBudget, track: true, magOff: 20, sigma0: 0.62 }),
-    initPoints(gpu, globalsBuf, base + 'galaxies/', quality, { budget: 400_000, track: false, magOff: 40, sigma0: 0.8 }),
+    initPoints(gpu, globalsBuf, base + 'galaxies/', quality, { budget: 400_000, track: false, magOff: 40, sigma0: 1.0 }),
     initGalaxies(gpu, globalsBuf, base, quality)]);
   const post = initPost(gpu, quality);
 
@@ -132,7 +132,7 @@ async function main() {
 
   let last = performance.now(), time = 0, frames = 0, fpsT = 0, fps = 0, cpuMs = 0;
   let busy = false, conFade = 1, nameFade = 1, labelT = 1, pointGain = 1, procFade = 1;
-  const DIFFUSE = 6;   // extended light is lifted relative to point sources, as dark-adapted eyes do
+  const DIFFUSE = 11;   // extended light is lifted relative to point sources, as dark-adapted eyes do
   function frame(now) {
     requestAnimationFrame(frame);
     const dt = Math.min(0.1, (now - last) / 1000); last = now;
@@ -143,6 +143,7 @@ async function main() {
     const gn = gal.near;
     let ctx = Math.max(2e-7, stars.near.dist);
     if (gn.id >= 0) ctx = Math.min(ctx, Math.max(gn.edge, gal.radius(gn.id) * 0.03));
+    if (show.proc) ctx = Math.min(ctx, gn.spacing);
     flight.context = Math.min(ctx, 3e8);
     if (!state.frozen) updateFlight(dt); else basis();
 
@@ -159,7 +160,7 @@ async function main() {
     //  - (points only) up further in the voids, so that distant galaxies show: pointGain
     const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
     const gainSB = 3.3 * sm(0.6, 2.0, out) + 1.0 * sm(3, 30, env);
-    const gainPt = Math.min(6.5, 2.6 * Math.log10(Math.max(env / 3, 1)));
+    const gainPt = Math.min(5.5, 2.1 * Math.log10(Math.max(env / 3, 1)));
     const n = stars.near;
     let target = exposureBase * Math.pow(10, 0.4 * gainSB);
     if (n.dist < 1e6) {
@@ -167,7 +168,8 @@ async function main() {
       const cosA = (dx * cam.fwd[0] + dy * cam.fwd[1] + dz * cam.fwd[2]) / d;
       const inView = Math.max(0, Math.min(1, (cosA - 0.2) / 0.5));       // fades out toward the edge of view and behind
       const e1 = Math.pow(10, -0.4 * n.absmag) * 100 / (d * d);         // its energy at exposure 1
-      if (e1 * inView * target > E_MAX) target = E_MAX / (e1 * inView);
+      // only part of the way: the star still glares, and the brightest background stars stay in sight
+      if (e1 * inView * target > E_MAX) target *= Math.pow(E_MAX / (e1 * inView * target), 0.62);
     }
     if (state.snap) { exposure = target; pointGain = Math.pow(10, 0.4 * gainPt); if (state.snap++ > 3) state.snap = 0; }
     exposure *= Math.pow(target / exposure, 1 - Math.exp(-dt * (target < exposure ? 6 : 1.5)));
@@ -176,10 +178,10 @@ async function main() {
     const starGain = Math.min(1, exposureBase / exposure * 1.0) ** 0.85;
     procFade += ((show.proc ? 1 : 0) - procFade) * (1 - Math.exp(-dt * 5));
     const magLimit = Math.min(magCap, -2.5 * Math.log10(E_THRESH / (exposure * starGain)) + quality.magBias);
-    const galLimit = -2.5 * Math.log10(E_THRESH * 1.66 / (exposure * pointGain)) + quality.magBias;
+    const galLimit = -2.5 * Math.log10(E_THRESH * 2.6 / (exposure * pointGain)) + quality.magBias;
     stars.update(magLimit);
     galPts.update(galLimit);
-    gal.update(W, H, pxScale, pointGain);
+    gal.update(W, H, pxScale, pointGain, starGain);
 
     gf[0] = cam.right[0]; gf[1] = cam.right[1]; gf[2] = cam.right[2]; gf[3] = 1 / Math.tan(cam.fov / 2);
     gf[4] = cam.up[0]; gf[5] = cam.up[1]; gf[6] = cam.up[2]; gf[7] = W / H;
@@ -192,7 +194,7 @@ async function main() {
     const fromSol = Math.hypot(cam.p[0], cam.p[1], cam.p[2]);
     conFade += ((show.lines ? 1 : 0) - conFade) * (1 - Math.exp(-dt * 5));
     const conVis = conFade * Math.max(0, Math.min(1, 1 - Math.log10(Math.max(fromSol, 1) / 150) / Math.log10(1000 / 150)));
-    lines.gain[LG_CON] = conVis * Math.min(1, exposure / 32);
+    lines.gain[LG_CON] = conVis * Math.min(1, Math.sqrt(exposure / 32));
     lines.update();
     nameFade += ((show.names ? 1 : 0) - nameFade) * (1 - Math.exp(-dt * 5));
     kindGain.con = conVis; kindGain.star = kindGain.body = kindGain.deep = kindGain.galaxy = nameFade;
