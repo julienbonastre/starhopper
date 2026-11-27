@@ -300,6 +300,7 @@ async function main() {
   let last = performance.now(), time = 0, frames = 0, fpsT = 0, fps = 0, cpuMs = 0;
   const dts = new Float32Array(128), dtSort = new Float32Array(128);
   let busy = false, exoFade = 0, conFade = 0, nameFade = 0, labelT = 1, pointGain = 1, procFade = 1;
+  let starCtx = 1;
   const DIFFUSE = 24;   // extended light is lifted relative to point sources, as dark-adapted eyes do
   const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   function frame(now) {
@@ -311,9 +312,15 @@ async function main() {
     time += dt;
     // context distance: the nearest star (never closer than about ten solar radii) or the galaxy being crossed
     const gn = gal.near;
-    let ctx = Math.max(2e-7, stars.near.dist);
+    // The nearest star's distance jumps about as stars go by, which made a held speed waver: it is followed
+    // smoothly (half a second, in the logarithm). And the top third of the touch throttle is an overdrive that stops
+    // slowing for single stars at all, so a galaxy can be crossed in seconds; nebulae, galaxies and planets still slow it.
+    const od = sm(0.66, 1, Math.abs(flight.thr));
+    const sd = Math.min(3e8, Math.max(2e-7, stars.near.dist) || 3e8);     // no star loaded yet: as if none were near
+    starCtx = state.snap ? sd : starCtx * Math.pow(sd / starCtx, 1 - Math.exp(-dt * 2));
+    let ctx = starCtx * Math.pow(1e6, od);
     if (gn.id >= 0) ctx = Math.min(ctx, Math.max(gn.edge, gal.radius(gn.id) * 0.03));
-    if (show.proc) ctx = Math.min(ctx, gn.spacing);
+    if (show.proc) ctx = Math.min(ctx, gn.spacing * Math.pow(1e6, od));
     if (deep.near.id >= 0) ctx = Math.min(ctx, Math.max(deep.near.edge, deep.radius(deep.near.id) * 0.15));
     flight.context = Math.min(ctx, 3e8);
     const bn = bodies.near;
