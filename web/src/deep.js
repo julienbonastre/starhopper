@@ -10,7 +10,7 @@ ${GLOBALS}
 @group(0) @binding(2) var noiseSmp: sampler;
 const OMEGA = 1.3333e-6;     // solid angle of one reference pixel (see galaxies.js)
 struct VO {
-  @builtin(position) pos: vec4f, @location(0) uv: vec2f,
+  @builtin(position) pos: vec4f, @location(0) uv: vec2f, @location(4) ndc: vec2f,
   @location(1) @interpolate(flat) c: vec4f,        // centre (camera-relative, pc), radius
   @location(2) @interpolate(flat) prm: vec4f,      // luminosity / R^2, kind, seed, weight of the resolved tier
   @location(3) @interpolate(flat) psf: vec2f,      // point tier: peak, sigma
@@ -33,10 +33,10 @@ fn vnoise(p: vec3f) -> f32 {
   let p = project(c.xyz);
   let inside = dist < c.w * 1.3;
   if ((peak < 0.0035 && w <= 0.0) || (p.z > 1.0 && !inside)) { o.pos = vec4f(0.0, 0.0, 2.0, 1.0); return o; }
-  if (inside) { o.pos = vec4f(corner, 0.5, 1.0); o.uv = corner * G.viewport; return o; }
+  if (inside) { o.pos = vec4f(corner, 0.5, 1.0); o.uv = corner * G.viewport; o.ndc = corner; return o; }
   let half = max(sigma * 3.6 + 1.0, select(0.0, sizePx * 1.35 + 2.0, w > 0.0));
   o.pos = vec4f(p.xy + corner * half * 2.0 / G.viewport, 0.5, 1.0);
-  o.uv = corner * half;
+  o.uv = corner * half; o.ndc = o.pos.xy;
   return o;
 }
 fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.06711056, 0.00583715)))); }
@@ -55,8 +55,8 @@ const YOUNGSTAR = vec3f(0.72, 0.82, 1.0);
     col += mix(vec3f(1.0), tint, 0.6) * i.psf.x * exp(-0.5 * r2);
   }
   if (i.prm.w > 0.0) {
-    let ndc = (i.pos.xy / G.viewport * 2.0 - 1.0) * vec2f(1.0, -1.0);
-    let d = normalize(G.right * ndc.x * G.aspect / G.focal + G.up * ndc.y / G.focal + G.fwd);
+    // the view ray comes from the interpolated clip position, so this works in a target of any resolution
+    let d = normalize(G.right * i.ndc.x * G.aspect / G.focal + G.up * i.ndc.y / G.focal + G.fwd);
     let R = i.c.w; let c = i.c.xyz / R;
     let b = dot(c, d); let p = c - d * b; let p2 = dot(p, p);
     if (p2 < 1.0) {
@@ -138,11 +138,15 @@ export async function initDeep(gpu, globalsBuf, base, noise) {
   });
   const bind = device.createBindGroup({ layout, entries: [{ binding: 0, resource: { buffer: globalsBuf } }, { binding: 1, resource: noise.view }, { binding: 2, resource: noise.sampler }] });
   const out = new Float32Array(Math.max(1, N) * 8), buf = device.createBuffer({ size: out.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+  // objects that loom large are drawn into the reduced-resolution volume target instead (they are soft, and a
+  // full-resolution march through one that fills the view costs milliseconds): up to BIG of them
+  const BIG = 24, outBig = new Float32Array(BIG * 8), bufBig = device.createBuffer({ size: outBig.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
   // nearest object: how far the camera is from its edge (pc), for the flight model
   const near = { id: -1, edge: Infinity };
-  let live = 0;
-  function update() {
-    live = 0; near.edge = Infinity; near.id = -1;
+  let live = 0, big = 0;
+  // k: pixels (CSS) that one radian spans at the centre of the view
+  function update(k) {
+    live = 0; big = 0; near.edge = Infinity; near.id = -1;
     const px = cam.p[0], py = cam.p[1], pz = cam.p[2];
     for (let i = 0; i < N; i++) {
       const x = pos[i * 3] - px, y = pos[i * 3 + 1] - py, z = pos[i * 3 + 2] - pz, R = rad[i];
@@ -151,14 +155,15 @@ export async function initDeep(gpu, globalsBuf, base, noise) {
       // open clusters within reach of the star catalogue are made of real stars already
       if (kind[i] === 0 && Math.hypot(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]) < 1800) continue;
       if (d > R * 6e4) continue;                                    // far too small and faint to matter
-      const o = live * 8;
-      out[o] = x; out[o + 1] = y; out[o + 2] = z; out[o + 3] = R;
-      out[o + 4] = lum[i]; out[o + 5] = kind[i]; out[o + 6] = seed[i]; out[o + 7] = 0;
-      live++;
+      const isBig = big < BIG && R / Math.max(d, 1e-9) * k > 70, a = isBig ? outBig : out, o = (isBig ? big++ : live++) * 8;
+      a[o] = x; a[o + 1] = y; a[o + 2] = z; a[o + 3] = R;
+      a[o + 4] = lum[i]; a[o + 5] = kind[i]; a[o + 6] = seed[i]; a[o + 7] = 0;
     }
     if (live) queue.writeBuffer(buf, 0, out, 0, live * 8);
+    if (big) queue.writeBuffer(bufBig, 0, outBig, 0, big * 8);
   }
   function draw(pass) { if (!live) return; pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.setVertexBuffer(0, buf); pass.draw(4, live); }
+  function drawBig(pass) { if (!big) return; pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.setVertexBuffer(0, bufBig); pass.draw(4, big); }
   const find = (name) => objs.findIndex((o) => o[0] === name);
-  return { update, draw, near, find, count: N, name: (i) => objs[i][0], labelled: (i) => objs[i][1] === 1, pos: (i, a) => pos[i * 3 + a], radius: (i) => rad[i], absmag: (i) => absmag[i], kind: (i) => data.kinds[kind[i]] };
+  return { update, draw, drawBig, hasBig: () => big > 0, near, find, count: N, name: (i) => objs[i][0], labelled: (i) => objs[i][1] === 1, pos: (i, a) => pos[i * 3 + a], radius: (i) => rad[i], absmag: (i) => absmag[i], kind: (i) => data.kinds[kind[i]] };
 }

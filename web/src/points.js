@@ -45,7 +45,10 @@ const CORE = 5.5;     // ... up to this sigma in CSS pixels
   let peak = min(ep / (6.2831853 * sigma * sigma), 40.0);
   let over = log2(1.0 + ep / (6.2831853 * PEAK * CORE * CORE * G.pxScale * G.pxScale));   // 1 where the disc stops growing
   let glare = smoothstep(0.6, 1.6, over);
-  let reach = sigma * min(3.6 + 2.2 * over * glare, 30.0);
+  // the sprite only needs to reach where its Gaussian has faded from sight: most stars are faint, and a snug quad
+  // for them saves most of the fill
+  let snug = clamp(sqrt(2.0 * log(max(peak / 0.0008, 1.2))), 0.9, 3.6);
+  let reach = sigma * min(snug + 2.2 * over * glare, 30.0);
   let p = project(rel);
   if (peak < 0.0035 || p.z > 1.0) { o.pos = vec4f(0.0, 0.0, 2.0, 1.0); return o; }
   let half = reach + 1.0;
@@ -66,7 +69,7 @@ const CORE = 5.5;     // ... up to this sigma in CSS pixels
   return vec4f(i.col * i.prm.x * (core + skirt) + mix(i.col, vec3f(1.0), 0.5) * halo, 1.0);
 }`;
 
-const MAX_DRAW = 2048, FETCHES = 8, SCAN_PER_FRAME = 60000;
+const MAX_DRAW = 2048, FETCHES = 8, SCAN_PER_FRAME = 60000, UPLOAD_PER_FRAME = 400_000;   // bytes
 
 let shared;   // pipeline and layouts, built once for all layers
 export async function initPoints(gpu, globalsBuf, dir, quality, opt) {
@@ -106,11 +109,19 @@ export async function initPoints(gpu, globalsBuf, dir, quality, opt) {
 
   const load = (i) => {
     state[i] = 1; loading++;
-    fetch(dir + i + '.bin').then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }).then((ab) => {
+    fetch(dir + i + '.bin').then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }).then((ab) => { ready.push(i, ab); }).catch(() => { state[i] = 0; loading--; });
+  };
+  // Tiles that have arrived wait here and go to the GPU a little at a time, so a burst of arrivals (flying back into
+  // a galaxy) never lands in one frame.
+  const ready = [];
+  const upload = () => {
+    let bytes = 0;
+    while (ready.length && bytes < UPLOAD_PER_FRAME) {
+      const i = ready.shift(), ab = ready.shift();
       const b = device.createBuffer({ size: ab.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
-      queue.writeBuffer(b, 0, ab);
+      queue.writeBuffer(b, 0, ab); bytes += ab.byteLength;
       bufs[i] = b; cpu[i] = new Uint32Array(ab); state[i] = 2; loadedStars += count[i]; lastUse[i] = frame; loading--;
-    }).catch(() => { state[i] = 0; loading--; });
+    }
   };
   const evict = () => {
     // drop the least recently used tiles that are not needed any more
@@ -126,6 +137,7 @@ export async function initPoints(gpu, globalsBuf, dir, quality, opt) {
   // magLimit: faintest apparent magnitude that still draws. Chooses tiles and, in each, the brightest-first prefix.
   function update(magLimit) {
     frame++;
+    if (ready.length) upload();
     const px = cam.p[0], py = cam.p[1], pz = cam.p[2];
     let sp = 0, nWant = 0;
     nDraw = 0; drawnStars = 0; pending = 0;

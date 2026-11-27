@@ -157,7 +157,7 @@ fn bvColour(bv: f32) -> vec3f {
   let peak = min(en * G.pxScale * G.pxScale / (6.2831853 * sigma * sigma), 40.0);
   let p = project(rel);
   if (peak < 0.0035 || p.z > 1.0) { return o; }
-  let half = sigma * 3.6 + 1.0;
+  let half = sigma * clamp(sqrt(2.0 * log(max(peak / 0.0008, 1.2))), 0.9, 3.6) + 1.0;   // snug around faint stars
   o.pos = vec4f(p.xy + corner * half * 2.0 / G.viewport, 0.5, 1.0);
   o.uv = corner * half; o.col = bvColour(bv); o.prm = vec2f(peak, sigma);
   return o;
@@ -469,10 +469,15 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
     queue.writeBuffer(layerBuf, 0, layerData);
   }
   // the reduced-resolution volume pass (its own render pass), then blit + impostors inside the scene pass
-  function drawVolumes(enc, timestampWrites) {
-    if (!nVol) return false;
+  // deep: the nebula layer, whose large members share this target
+  function drawVolumes(enc, timestampWrites, deep) {
+    const extra = deep && deep.hasBig();
+    if (!nVol && !extra) return false;
     volAttach.timestampWrites = timestampWrites;
-    const p = enc.beginRenderPass(volAttach); p.setPipeline(volume); p.setBindGroup(0, vBind); p.draw(3); p.end();
+    const p = enc.beginRenderPass(volAttach);
+    if (nVol) { p.setPipeline(volume); p.setBindGroup(0, vBind); p.draw(3); }
+    if (extra) deep.drawBig(p);
+    p.end();
     return true;
   }
   function draw(pass, hadVol, skip) {

@@ -295,7 +295,7 @@ async function main() {
     stars.update(magLimit);
     galPts.update(galLimit);
     gal.update(W, H, pxScale, pointGain, starGain);
-    deep.update();
+    deep.update((1 / Math.tan(cam.fov / 2)) * (H / pxScale) * 0.5);
     exoFade += ((show.exo ? 1 : 0) - exoFade) * (1 - Math.exp(-dt * 5));
     markers.update(exoFade);
 
@@ -327,7 +327,7 @@ async function main() {
     const enc = device.createCommandEncoder();
     // the GPU timer runs from the first pass of the frame (the volume pass when there is one) to the last
     const timed = ts && !ts.busy, sk = state.skip;
-    const hadVol = !sk.vol && gal.drawVolumes(enc, timed ? tsBegin : undefined);
+    const hadVol = !sk.vol && gal.drawVolumes(enc, timed ? tsBegin : undefined, sk.deep ? null : deep);
     const sceneDesc = post.sceneAttach(); sceneDesc.timestampWrites = timed && !hadVol ? tsBegin : undefined;
     const pass = enc.beginRenderPass(sceneDesc);
     if (!sk.gal) gal.draw(pass, hadVol, sk);
@@ -401,10 +401,11 @@ async function main() {
     const stat = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? { avg: +(s.reduce((x, y) => x + y, 0) / s.length).toFixed(2), p99: +s[Math.floor(s.length * 0.99)].toFixed(2), max: +s[s.length - 1].toFixed(2), n: s.length } : null; };
     setPose(0); state.snap = 1; await new Promise((r) => setTimeout(r, 1500));
     bench = { frame: [], gpu: [] };
-    for (let i = 1; i <= POSES.length; i++) { const p = POSES[i % POSES.length]; flyTo(p.p[0], p.p[1], p.p[2], 0, secs); await new Promise((r) => setTimeout(r, secs * 1000 + 300)); }
+    const legs = [];
+    for (let i = 1; i <= POSES.length; i++) { const p = POSES[i % POSES.length], g0 = bench.gpu.length; flyTo(p.p[0], p.p[1], p.p[2], 0, secs); await new Promise((r) => setTimeout(r, secs * 1000 + 300)); const g = bench.gpu.slice(g0); legs.push({ to: p.name, avg: +(g.reduce((x, y) => x + y, 0) / Math.max(1, g.length)).toFixed(2), max: +Math.max(0, ...g).toFixed(2), over: g.filter((x) => x > 8.3).length }); }
     const b = bench; bench = null;
     const budget = period * 1000;
-    return { frameMs: stat(b.frame), gpuMs: stat(b.gpu), late: b.frame.filter((x) => x > budget * 1.6).length, gpuOver: b.gpu.filter((x) => x > 8.3).length, size: [W, H], scale: resScale, level: LEVEL, mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null };
+    return { frameMs: stat(b.frame), gpuMs: stat(b.gpu), late: b.frame.filter((x) => x > budget * 1.6).length, gpuOver: b.gpu.filter((x) => x > 8.3).length, legs, size: [W, H], scale: resScale, level: LEVEL, mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null };
   };
   window.SH = { deep, bodies, pick, target, labels, bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
 }

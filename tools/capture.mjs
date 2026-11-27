@@ -1,5 +1,5 @@
 // Renders the fixed viewpoints in a real browser and saves them as PNGs, with a small report.
-//   node tools/capture.mjs [--out captures] [--size 1920x1080] [--poses 1,2,3] [--q 0] [--headed] [--query extra=1]
+//   node tools/capture.mjs [--out captures] [--size 1920x1080] [--poses 1,2,3] [--q 0] [--headed] [--query extra=1] [--fly]
 // Needs `npm run data && npm run build:dev` first, and Playwright (`npm i` installs it; it drives your Chrome).
 // Set PW_CHROME to a Chromium binary to use that instead of the installed Chrome.
 import { spawn } from 'node:child_process';
@@ -45,6 +45,27 @@ try {
     const info = await page.evaluate(() => ({ stars: SH.stars.stats().drawn, galaxies: SH.galPts.stats().drawn, perf: SH.perf ? SH.perf() : null }));
     report.poses.push({ n, name: names[n - 1], file, ...info });
     console.log(`pose ${n} ${names[n - 1]}: ${info.stars} stars, ${info.galaxies} galaxy points${info.perf ? `, ${JSON.stringify(info.perf)}` : ''}`);
+  }
+  // --fly: pairs of frames a few frames apart along the scripted fly-through, to show popping, shimmer and seams
+  if (process.argv.includes('--fly')) {
+    report.fly = [];
+    await page.evaluate(() => { SH.setPose(0); SH.settle(); });
+    await page.waitForTimeout(1500);
+    for (let leg = 1; leg <= names.length; leg++) {
+      await page.evaluate((i) => { const p = SH.POSES[i % SH.POSES.length]; SH.flyTo(p.p[0], p.p[1], p.p[2], 0, 11); }, leg);
+      for (const [k, at] of [[0, 3200], [1, 3600]]) {
+        await page.waitForTimeout(at);
+        for (const half of ['a', 'b']) {
+          const f0 = await page.evaluate(() => SH.frames());
+          if (half === 'b') await page.waitForFunction((f) => SH.frames() >= f + 3, f0, { timeout: 60000 });
+          const url = await page.evaluate(() => SH.capture()), file = `fly_${leg}_${k}${half}.png`;
+          writeFileSync(path.join(out, file), Buffer.from(url.split(',')[1], 'base64'));
+          report.fly.push({ file, toward: names[leg % names.length] });
+        }
+      }
+      await page.waitForTimeout(11000 - 6800 + 400);
+    }
+    console.log(`fly-through: ${report.fly.length} frames`);
   }
   report.console = logs;
   writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 1));
