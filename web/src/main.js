@@ -105,6 +105,8 @@ async function main() {
       for (let k = 0; k < NP; k++) { const a = k * 3, b = ((k + 1) % NP) * 3; lines.add(op[a], op[a + 1], op[a + 2], op[b], op[b + 1], op[b + 2], 0.10, 0.13, 0.20, 0.5, LG_ORBIT); }
       labels.add(pl.name, 'body', bodies.pos(i + 1, 0), bodies.pos(i + 1, 1), bodies.pos(i + 1, 2), NaN, 0.004, bodies.radius(i + 1) * 2.5, -10, bodies.radius(i + 1));
     });
+    const mn = bodies.count - 1;   // the Moon: named out to a few million kilometres
+    labels.add('Moon', 'body', bodies.pos(mn, 0), bodies.pos(mn, 1), bodies.pos(mn, 2), NaN, 2e-7, bodies.radius(mn) * 2.5, -10, bodies.radius(mn));
   }
   labels.occluder(bodies.hides);
   place(0, bodies.night());

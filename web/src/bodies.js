@@ -5,11 +5,11 @@
 // the CPU, so the shader's arithmetic stays exact from low orbit out to the edge of the system.
 import { GLOBALS, HDR } from './gpu.js';
 import { cam, PC_AU } from './camera.js';
-import { SUN, PLANETS, planetPos, earthRotation } from './solar.js';
+import { SUN, PLANETS, MOON, planetPos, moonPos, earthRotation } from './solar.js';
 
 const KM_PC = 1 / 3.0856775814913673e13;
 // geometric albedos (visual): how much sunlight each planet sends back at full phase
-const ALBEDO = [0.142, 0.689, 0.434, 0.170, 0.538, 0.499, 0.488, 0.442];
+const ALBEDO = [0.142, 0.689, 0.434, 0.170, 0.538, 0.499, 0.488, 0.442, 0.12];   // the planets, then the Moon
 const L_SUN = Math.pow(10, -0.4 * 4.83) * 100;     // the Sun in the star shader's units (absolute magnitude 4.83)
 
 const SHADER = /*wgsl*/`
@@ -118,6 +118,13 @@ fn hash1(x: f32) -> f32 { return fract(sin(x * 127.1) * 43758.5453); }
           alb *= 1.0 + 0.16 * sin(lat * 23.0 + 2.0 * sin(lat * 7.0)) + 0.08 * sin(lat * 61.0);
         }
         body = alb * 2.4 * max(lit, 0.0) * (0.35 + 0.65 * mu);      // a little limb darkening
+        if (kind == 4.0) {
+          // the Moon: dark seas and a rough, cratered look (a stand-in pattern, not a map), lit flat to the limb as
+          // the full Moon is
+          let sea = smoothstep(0.43, 0.57, vnoise(n * 2.3 + 11.0) * 0.6 + vnoise(n * 5.1 + 3.0) * 0.4);
+          let rough = (0.86 + 0.28 * vnoise(n * 23.0)) * (0.92 + 0.16 * vnoise(n * 71.0));
+          body = i.col.rgb * mix(0.5, 1.0, sea) * rough * 1.5 * max(lit, 0.0) * (0.8 + 0.2 * mu);
+        }
       }
       cover = 1.0;
       // shadow of the rings is left out; the planet's shadow on the rings is not
@@ -166,14 +173,15 @@ struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
 
 export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
   const { device, queue } = gpu;
-  const NB = PLANETS.length + 1, F = 20;
+  const BODY = [SUN, ...PLANETS, MOON], NB = BODY.length, F = 20, EARTH = 3, LUNA = NB - 1;
   // heliocentric positions for the date (fixed for the session: the planets move far too slowly to see)
   const pos = new Float64Array(NB * 3), radius = new Float64Array(NB), tmp = new Float64Array(3);
   radius[0] = SUN.radius * KM_PC;
   PLANETS.forEach((p, i) => { planetPos(i, jd, tmp); pos.set(tmp, (i + 1) * 3); radius[i + 1] = p.radius * KM_PC; });
+  // the Moon, around the Earth
+  moonPos(jd, tmp); for (let a = 0; a < 3; a++) pos[LUNA * 3 + a] = pos[EARTH * 3 + a] + tmp[a]; radius[LUNA] = MOON.radius * KM_PC;
   const spin = earthRotation(jd);
-  const names = ['Sun', ...PLANETS.map((p) => p.name)];
-  const EARTH = 3;
+  const names = BODY.map((p) => p.name);
 
   const module = device.createShaderModule({ code: SHADER });
   const layout = device.createBindGroupLayout({ entries: [
@@ -238,8 +246,8 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
       const i = order[k], R = radius[i], o = live * F, d = dist[i];
       if (d > 0.02) continue;                                            // beyond a few thousand AU the catalogue Sun is all there is
       out[o] = (pos[i * 3] - cam.p[0]) / R; out[o + 1] = (pos[i * 3 + 1] - cam.p[1]) / R; out[o + 2] = (pos[i * 3 + 2] - cam.p[2]) / R;
-      const P = i ? PLANETS[i - 1] : SUN;
-      out[o + 3] = i === 0 ? 2 : i === EARTH ? 1 : i >= 5 ? 3 : 0;
+      const P = BODY[i];
+      out[o + 3] = i === 0 ? 2 : i === EARTH ? 1 : i >= 5 && i <= 8 ? 3 : i === LUNA ? 4 : 0;
       out[o + 4] = P.color[0]; out[o + 5] = P.color[1]; out[o + 6] = P.color[2]; out[o + 7] = 0;
       const ds = Math.hypot(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]) || 1;
       const lx = -pos[i * 3] / ds, ly = -pos[i * 3 + 1] / ds, lz = -pos[i * 3 + 2] / ds;
