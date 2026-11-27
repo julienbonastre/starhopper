@@ -31,7 +31,7 @@ Measured, from catalogues pinned by checksum:
 
 - **Stars**: AT-HYG 4.0, 2.53 million stars with distances (Hipparcos, Tycho-2, Gaia), magnitudes and colours.
 - **Constellations and star names**: Stellarium's modern sky culture. The figures are drawn between the stars' real 3D positions, so they distort as you leave the Sun.
-- **Sun and planets**: JPL's approximate Keplerian elements, at today's date.
+- **Sun, planets and Moon**: JPL's approximate Keplerian elements for the planets and the Astronomical Almanac's low-precision series for the Moon, at today's date. All at true size and distance, so from the Earth the planets are points of light: search for one by name to fly to it.
 - **Nebulae and clusters**: OpenNGC, with distances from Harris (globulars), Hunt & Reffert (Gaia clusters), Gaia-based planetary nebula and supernova remnant catalogues, molecular cloud distances and SIMBAD.
 - **Galaxies**: GLADE 2.3 as points out to 268 Mpc; 10,900 OpenNGC and Local Volume galaxies with size, tilt and Hubble type, with distances from the Updated Nearby Galaxy Catalog and Cosmicflows-3 where they exist.
 - **Exoplanet hosts**: NASA Exoplanet Archive, 4,520 stars.
@@ -98,7 +98,7 @@ Sizes:
 - **Nebula distances by association**: about 100 of the 1,198 nebulae have no measured distance of their own and take that of the cluster inside them or the nearest molecular cloud sightline. Some are wrong (the Pencil Nebula lands at 1,962 pc; it is about 250 pc). They are not flagged in the app.
 - **Names** are the first common name OpenNGC gives, so M 11 is "Amas de l'Ecu de Sobieski" and the Tarantula is "30 Dor Cluster"; search by Messier or NGC number always works.
 - **Earth image**: 5400 x 2700, larger than "modest"; no smaller Blue Marble is still served at a fixed address. Phones decode it at 2048 x 1024.
-- **Planets**: no moons, rotation or axial tilts; valid for 1800 to 2050.
+- **Planets**: no moons but our own, no rotation or axial tilts, and nothing moves while you watch; valid for 1800 to 2050. The Moon's seas are a stand-in pattern, not a map.
 - **Sharing a view** (image plus a link carrying position and heading) is on the backlog.
 
 Inspired by [Abyssal Garden](https://github.com/Noniv/abyssal-garden).

@@ -1,7 +1,7 @@
 // Checks the planet positions and the Earth's rotation angle against JPL Horizons and textbook values.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PLANETS, SUN, planetPos, orbitPoints, jdNow, earthRotation } from '../web/src/solar.js';
+import { MOON, moonPos, PLANETS, SUN, planetPos, orbitPoints, jdNow, earthRotation } from '../web/src/solar.js';
 
 const D = Math.PI / 180, AU = 206264.806247, EPS = 23.43928 * D;
 const p = new Float64Array(3);
@@ -102,4 +102,16 @@ test('constants and the clock', () => {
   assert.ok(Math.abs(tilt - 26.73) < 0.2, `Saturn's obliquity ${tilt.toFixed(2)}`);
   const now = jdNow(); assert.ok(Math.abs(now - (Date.now() / 86400000 + 2440587.5)) < 1e-6 && now > 2461000);
   assert.ok(Math.abs((Date.UTC(2000, 0, 1, 12) / 86400000 + 2440587.5) - 2451545.0) < 1e-9, 'the Unix epoch is JD 2440587.5');
+});
+
+test('the Moon is where Meeus puts it on 1992 April 12, and always at a lunar distance', () => {
+  const KM = 3.0856775814913673e13, v = moonPos(2448724.5, [0, 0, 0]), r = Math.hypot(...v);
+  // Meeus, Astronomical Algorithms, example 47.a: longitude 133.162, latitude -3.229 (of date), 368,409.7 km
+  const e = 23.43928 * Math.PI / 180, y = Math.cos(e) * v[1] + Math.sin(e) * v[2], z = -Math.sin(e) * v[1] + Math.cos(e) * v[2];
+  const lon = Math.atan2(y, v[0]) * 180 / Math.PI, lat = Math.asin(z / r) * 180 / Math.PI;
+  assert.ok(Math.abs(lon - (133.162 + 1.39697 * 0.0772)) < 0.5, 'longitude ' + lon);
+  assert.ok(Math.abs(lat + 3.229) < 0.4, 'latitude ' + lat);
+  assert.ok(Math.abs(r * KM - 368409.7) < 2500, 'distance ' + r * KM);
+  for (let d = 0; d < 400; d += 3) { const k = Math.hypot(...moonPos(2461000 + d, [0, 0, 0])) * KM; assert.ok(k > 354000 && k < 408000, 'distance ' + k); }
+  assert.equal(MOON.name, 'Moon');
 });
