@@ -157,7 +157,7 @@ async function main() {
   let last = performance.now(), time = 0, frames = 0, fpsT = 0, fps = 0, cpuMs = 0;
   const dts = new Float32Array(128), dtSort = new Float32Array(128);
   let busy = false, conFade = 1, nameFade = 1, labelT = 1, pointGain = 1, procFade = 1;
-  const DIFFUSE = 11;   // extended light is lifted relative to point sources, as dark-adapted eyes do
+  const DIFFUSE = 20;   // extended light is lifted relative to point sources, as dark-adapted eyes do
   function frame(now) {
     requestAnimationFrame(frame);
     const dt = Math.min(0.1, (now - last) / 1000); last = now;
@@ -185,7 +185,7 @@ async function main() {
     //  - up by a few magnitudes once outside a galaxy's disc, so its surface brightness reads well
     //  - (points only) up further in the voids, so that distant galaxies show: pointGain
     const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-    const gainSB = 3.3 * sm(0.6, 2.0, out) + 1.0 * sm(3, 30, env);
+    const gainSB = 2.1 * sm(0.6, 2.0, out) + 1.0 * sm(3, 30, env);
     const gainPt = Math.min(6.5, 2.6 * Math.log10(Math.max(env / 1.3, 1)));
     const n = stars.near;
     let target = exposureBase * Math.pow(10, 0.4 * gainSB);

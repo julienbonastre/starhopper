@@ -56,11 +56,15 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32) -> vec4f {
   let disc = (1.0 - p.fb) / (12.566 * p.h * p.h * p.hz) * exp(-r / p.h - az / p.hz) * (1.0 - smoothstep(0.85, 1.65, r));
   if (disc < 1e-4 && bul < 1e-4) { return vec4f(0.0); }
   let th = atan2(q.y, q.x) * p.wind;
-  let ph = p.arms * (th - log(max(r, 0.02)) * p.pitch) + p.phase;
+  var n1 = 0.5; var n2 = 0.0; var wob = 0.0;
+  // real arms are not ruled spirals: a slow wander in phase bends, forks and breaks them
+  if (detail > 0.0) { wob = (vnoise(vec3f(q.xy * 2.7, 0.37) + sd * 1.3) - 0.5) * 3.0 * detail; }
+  let ph = p.arms * (th - log(max(r, 0.02)) * p.pitch) + p.phase + wob;
   let c = 0.5 + 0.5 * cos(ph);
+  let c2 = 0.5 + 0.5 * cos(2.0 * ph + 1.3 - wob * 1.6);          // spurs and secondary arms at twice the count
   let inner = smoothstep(0.04, 0.22, r);
-  let arm = c * c * c * 3.2;                                   // mean 1 around the circle
-  var n1 = 0.5; var n2 = 0.0;
+  let c4 = c * c * c * c;
+  let arm = c4 * 2.85 + c2 * c2 * 0.59;                         // main arms + spurs; mean 1 around the circle
   if (detail > 0.0) {
     // each octave is rotated against the last, so the noise lattice never lines up into a visible weave
     let w = vec3f(q.x * 0.8 - q.y * 0.6, q.x * 0.6 + q.y * 0.8, q.z) * vec3f(13.0, 13.0, 36.0) + sd;
@@ -69,8 +73,11 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32) -> vec4f {
     n2 = vnoise(vec3f(w2.x * 0.7 - w2.y * 0.71, w2.x * 0.71 + w2.y * 0.7, w2.z) * 1.9 + 31.7);
   }
   let clumps = mix(1.0, 0.25 + 1.5 * n1, p.clump * (0.5 + 0.5 * detail));
-  let discE = disc * mix(1.0, arm, p.armC * inner) * clumps;
-  let fy = clamp(c * c * p.armC * inner * 0.75 + p.clump * 0.45 - 0.1, 0.0, 1.0);
+  // star formation is patchy along the arms: they break into bright stretches and gaps
+  let knot = mix(1.0, 0.3 + 1.4 * smoothstep(0.3, 0.7, n1), detail);
+  // ... and the whole disc is mottled with star clouds a few hundred parsecs across
+  let discE = disc * mix(1.0, arm * knot, p.armC * inner) * clumps * mix(1.0, 0.5 + n2, detail);
+  let fy = clamp(c4 * p.armC * inner * 0.95 + p.clump * 0.45 - 0.1, 0.0, 1.0);
   var col = OLD * bul + discE * mix(OLD * 0.95, YOUNG, fy);
   col += HII * disc * smoothstep(0.66, 0.92, n2) * arm * inner * (p.armC + p.clump * 0.6) * 1.1 * detail;
   if (p.bar > 0.0) {
@@ -78,7 +85,12 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32) -> vec4f {
     col += OLD * p.bar * (1.0 - p.fb) * 2.6 * exp(-(xb.x * xb.x) / 0.045 - (xb.y * xb.y) / 0.0035 - q.z * q.z / 0.003);
   }
   let cd = 0.5 + 0.5 * cos(ph + 0.85);
-  let dust = (1.0 - p.fb) * exp(-r / (p.h * 1.5) - az / (p.hz * 0.4)) * (0.2 + 1.6 * cd * cd * inner * p.armC + p.clump) * (0.35 + 1.3 * n1) * (1.0 - smoothstep(1.0, 1.5, r));
+  // dust: a thin, patchy layer. Its mid-plane wanders and its density comes in clouds, so that seen edge-on (or from
+  // inside) the lane breaks up into rifts and windows instead of one ruled line.
+  let nd = n1 * 0.55 + n2 * 0.45;
+  let zd = abs(q.z + (n1 - 0.5) * p.hz * 1.1 * detail);
+  let cloud = mix(1.0, 3.6 * smoothstep(0.36, 0.72, nd), detail);
+  let dust = (1.0 - p.fb) * exp(-r / (p.h * 1.5) - zd / (p.hz * 0.4)) * (0.2 + 1.6 * cd * cd * inner * p.armC + p.clump) * cloud * (1.0 - smoothstep(1.0, 1.5, r));
   return vec4f(col, dust);
 }
 `;
@@ -304,7 +316,10 @@ fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.0671105
       let um = pow((s + jit) / N, pw);
       let tn = t0 + (t1 - t0) * u1; let t = t0 + (t1 - t0) * um; let dt = tn - prev; prev = tn;
       // no fine structure right around the camera: there it would be a few huge blotches across the whole sky
-      let e = galEmit(ro + rd * t, P, sd, smoothstep(0.02, 0.12, t));
+      var e = galEmit(ro + rd * t, P, sd, smoothstep(0.02, 0.12, t));
+      // the camera's own neighbourhood is left to individual stars (catalogued or fill): the model supplies only
+      // the light from farther off, which keeps the sky dark away from the plane
+      e = vec4f(e.rgb * smoothstep(0.0, 0.11, t), e.a * smoothstep(0.0, 0.03, t));
       let a = exp(-e.a * V.kappa * dt);
       acc += tr * e.rgb * dt * (1.0 + a) * 0.5;
       tr *= a;
