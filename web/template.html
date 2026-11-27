@@ -37,8 +37,8 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 #keys kbd { font: inherit; color: var(--fg); }
 #find { width: 100%; margin-top: 18px; font: inherit; color: var(--fg); background: #ffffff10; border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; outline: none; -webkit-user-select: text; user-select: text; }
 #find:focus { border-color: var(--acc); }
-#vol { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
-#vol input { width: 110px; accent-color: #dfe6f5; }
+#vol, #eng { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+#vol input, #eng input { width: 110px; accent-color: #dfe6f5; }
 #tg { margin-top: 12px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
 #cr { margin-top: 14px; font-size: 11px; color: var(--dim); text-align: left; } #cr summary { cursor: pointer; text-align: center; } #crb p { margin: 8px 0 0; } #crb a { color: inherit; }
 #lv, #vp, #sv { margin-top: 12px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
@@ -63,6 +63,11 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 #thr b { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; border: 1px solid #ffffff55; background: #ffffff14; }
 #thr b.on { background: #ffffff38; border-color: #fff; }
 @media (pointer: coarse) { body.fly #thr { display: block; } }
+#tb { position: fixed; z-index: 4; left: 50%; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: none; align-items: center; gap: 10px; max-width: calc(100vw - 190px); padding: 7px 8px 7px 14px; font-size: 12px; background: #06080cd0; border: 1px solid #ffffff22; border-radius: 999px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+body.fly #tb.on { display: flex; }
+#tbn { color: var(--acc); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tb button { appearance: none; font: inherit; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; color: #000; background: var(--fg); border: 0; border-radius: 999px; padding: 8px 14px; cursor: pointer; }
+#tb #tbx { color: var(--fg); background: #ffffff1c; padding: 8px 11px; }
 #tk { display: none; margin-top: 14px; font-size: 12px; color: var(--dim); line-height: 1.7; }
 @media (pointer: coarse) { #tk { display: block; } }
 #turn { display: none; position: fixed; inset: 0; z-index: 9; background: #000; place-items: center; text-align: center; letter-spacing: .22em; text-transform: uppercase; font-size: 12px; color: var(--dim); }
@@ -77,6 +82,7 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 <button id="menu" aria-label="Menu">&#8801;</button>
 <div id="turn">Turn your phone sideways</div>
 <div id="thr"><i></i><b id="thrk"></b></div>
+<div id="tb"><span id="tbn"></span><button id="tbgo">Fly there</button><button id="tbx" aria-label="Clear the target">&times;</button></div>
 <div id="ctx" hidden><div id="ctxn"></div><button id="ctxgo">Fly here</button><button id="ctxno">Not now</button></div>
 <div id="veil"><div id="card">
 <h1>Starhopper</h1>
@@ -88,9 +94,9 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 <kbd>W A S D</kbd><span>fly</span><kbd>Mouse</kbd><span>look</span><kbd>R / F</kbd><span>up / down</span><kbd>Q / E</kbd><span>roll</span>
 <kbd>Wheel</kbd><span>throttle</span><kbd>Shift / Ctrl</kbd><span>&times;10 / &divide;10</span><kbd>Click</kbd><span>target what you look at</span><kbd>G</kbd><span>fly to the target</span><kbd>1 &ndash; 8</kbd><span>viewpoints</span><kbd>Home</kbd><span>back to Earth</span><kbd>L N X P</kbd><span>lines, names, exoplanet hosts, fill</span><kbd>M</kbd><span>sound</span><kbd>[ ]</kbd><span>exposure</span><kbd>Tab / H</kbd><span>hide panel / frame stats</span><kbd>Esc</kbd><span>this menu</span>
 </div></details>
-<div id="tk">Drag the sky to look around &middot; Right edge: push up to fly forward, pull down to back away<br>Two fingers: spread or pinch to fly, twist to roll<br>Tap: target &middot; Double tap: fly there &middot; Hold: go-to menu</div>
+<div id="tk">Drag the sky to look around &middot; Right edge: push up to fly forward, pull down to back away<br>Two fingers: spread or pinch to fly, twist to roll<br>Tap: target, then Fly there &middot; Double tap: fly there at once</div>
 <input id="find" type="search" placeholder="Fly to a star, planet, nebula or galaxy: Vega, Saturn, M 42, Andromeda ..." autocomplete="off" spellcheck="false">
-<div id="tg"><button data-k="lines">Constellations</button><button data-k="names">Names</button><button data-k="proc" class="on">Procedural fill</button><button data-k="exo">Exoplanet hosts</button><button data-k="sound" class="on">Sound</button><label id="vol">Volume<input id="volr" type="range" min="0" max="100" value="70"></label></div>
+<div id="tg"><button data-k="lines">Constellations</button><button data-k="names">Names</button><button data-k="proc" class="on">Procedural fill</button><button data-k="exo">Exoplanet hosts</button><button data-k="sound" class="on">Sound</button><label id="vol">Volume<input id="volr" type="range" min="0" max="100" value="70"></label><label id="eng">Engine<input id="engr" type="range" min="0" max="100" value="60"></label></div>
 <div id="vp"></div>
 <div id="sv"><input id="svn" type="text" maxlength="40" placeholder="Name this place to save it" autocomplete="off" spellcheck="false"><button id="svb">Save</button></div>
 <div id="svl"></div>
