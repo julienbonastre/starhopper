@@ -233,7 +233,10 @@ struct VO {
       let ay = cross(n, ax);
       let q = vec3f(dot(hit, ax), dot(hit, ay), 0.0);
       let v = galEmit(q, P, f32(i.id.y & 1023u), select(0.0, 1.0, i.prm.w > 40.0));
-      let spher = OLD * P.fb / (9.8696 * P.qz * P.rb * P.rb * P.rb) * pow(1.0 + dot(q.xy, q.xy) / (P.rb * P.rb), -2.0);
+      // the bulge's share of v, exactly as galEmit adds it (outer cut included: without it the difference goes
+      // negative past r = 1 and the disc ends in a hard edge)
+      let rq = dot(q.xy, q.xy);
+      let spher = OLD * P.fb / (9.8696 * P.qz * P.rb * P.rb * P.rb) * pow(1.0 + rq / (P.rb * P.rb), -2.0) * (1.0 - smoothstep(1.0, 1.7, sqrt(rq)));
       em += max(v.rgb - spher, vec3f(0.0)) * 2.0 * P.hz / ka * exp(-v.a * 12.0 * P.hz / ka);
     }
     col += em * i.prm.y * omega * i.prm.z;
