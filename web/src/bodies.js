@@ -40,9 +40,11 @@ struct VO {
   // reflected (or, for the Sun, no) point light; ex.x is the luminosity over distance squared
   let e = G.exposure * ex.x * G.pxScale * G.pxScale;
   let s0 = 0.62 * G.pxScale;
-  let sigma = min(max(s0, sqrt(e / (6.2831853 * 2.6))), 26.0 * G.pxScale);
+  // A planet close by would outshine everything at the exposure the stars are drawn at, and then turn into a far
+  // dimmer disc: the point is held to the glare of a very bright star, and hands over to the disc as that appears.
+  let sigma = min(max(s0, sqrt(e / (6.2831853 * 2.6))), 3.0 * G.pxScale);
   let w = smoothstep(0.7, 2.0, rpx);
-  let peak = min(e / (6.2831853 * sigma * sigma), 40.0) * (1.0 - w);
+  let peak = min(e / (6.2831853 * sigma * sigma), 2.6) * (1.0 - smoothstep(0.8, 3.0, rpx));
   let p = project(c.xyz);
   o.c = c; o.col = vec4f(col.rgb, rpx); o.sun = sun; o.ring = ring; o.psf = vec4f(peak, sigma, ex.y, w); o.mapped = ex.z;
   if ((peak < 0.0035 && w <= 0.0) || (p.z > 1.0 && sinA < 0.2)) { o.pos = vec4f(0.0, 0.0, 2.0, 1.0); return o; }
