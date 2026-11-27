@@ -165,6 +165,8 @@ async function main() {
       const sc = Math.acos(Math.min(1, c)) - Math.min(r[8] / d * 0.7, 0.2);
       if (sc < bs) { bs = sc; best = i; }
     }
+    // nothing there, or the target itself picked again: no target
+    if (best >= 0 && target.on && index[best][2] === target.x && index[best][3] === target.y && index[best][4] === target.z) best = -1;
     if (best < 0) { target.on = false; labels.items[tgtLabel].maxDist = 0; $('htr').hidden = true; return; }
     const r = index[best];
     target.on = true; target.x = r[2]; target.y = r[3]; target.z = r[4]; target.stop = r[5]; target.name = r[1];
@@ -190,7 +192,8 @@ async function main() {
   };
   $('go').onclick = launch;
   // a click looks at what is dead ahead (the pointer is locked to the view) and targets it
-  canvas.onclick = () => { if (!body.classList.contains('fly')) return; if (flight.locked) pick(cam.fwd[0], cam.fwd[1], cam.fwd[2]); else canvas.requestPointerLock?.()?.catch?.(() => {}); };
+  // (a mouse click only: the click a phone makes up after a tap must not lock the pointer, which swallows every touch after it)
+  canvas.onclick = (e) => { if (!body.classList.contains('fly') || MOBILE || (e.pointerType && e.pointerType !== 'mouse')) return; if (flight.locked) pick(cam.fwd[0], cam.fwd[1], cam.fwd[2]); else canvas.requestPointerLock?.()?.catch?.(() => {}); };
   // viewpoints and save points (kept in this browser only)
   POSES.forEach((p, i) => { const b = document.createElement('button'); b.textContent = p.name; b.onclick = () => { cancelGoto(); setPose(i); state.snap = 1; launch(); flash(p.name); }; $('vp').append(b); });
   let saves = []; try { saves = JSON.parse(localStorage.starhopperSaves || '[]'); } catch {}
@@ -234,7 +237,7 @@ async function main() {
 
   // Everything the first frame does not need: names, constellation figures, nebulae and clusters, exoplanet hosts.
   // Fetched together once the flight is already on screen.
-  let web = null;
+  let web = null, thrShown = 0;
   initWeb(gpu, globalsBuf, base).then((w) => { web = w; }).catch((e) => console.warn('no density grid', e));
   const extras = Promise.all([fetch(base + 'names.json').then((r) => r.json()), fetch(base + 'constellations.json').then((r) => r.json()),
     initDeep(gpu, globalsBuf, base, gal.noise), fetch(base + 'exoplanets.json').then((r) => r.json()).catch(() => ({ hosts: [] }))]).then(([names, cons, dp, exo]) => {
@@ -285,6 +288,7 @@ async function main() {
     const bn = bodies.near;
     if (bn.id >= 0) flight.context = Math.min(flight.context, Math.max(bn.alt, bodies.radius(bn.id) * 0.02));
     if (!state.frozen) updateFlight(dt); else basis();
+    if (flight.thr !== thrShown) { thrShown = flight.thr; const k = $('thrk'); k.style.transform = `translateY(${(-thrShown * innerHeight * 0.32).toFixed(1)}px)`; k.className = thrShown ? 'on' : ''; }
     bodies.update();
 
     // how far outside the nearest galaxy's disc the camera is, in units that make 0..1 "inside" (see adaptation below)
