@@ -57,9 +57,9 @@ export function initLabels(gpu, globalsBuf, getScale) {
   let live = 0, cursor = 0, nCand = 0;
   const copySrc = { source: cv, origin: [0, 0] }, copyDst = { texture: tex, origin: [0, 0] }, copySize = [SW * scale, SH * scale];
 
-  // text, kind, world position (pc). Priority is the apparent magnitude from absmag, or the fixed rank if absmag is NaN.
-  function add(text, kind, x, y, z, absmag, maxDist = Infinity, minDist = 0, rank = 0) {
-    items.push({ rank, text: KIND[kind].upper ? text.toUpperCase() : text, kind, x, y, z, absmag, maxDist, minDist, slot: -1, sx: 0, sy: 0, vis: 0 });
+  // text, kind, world position (pc). radius (pc) moves a centred label out below an extended object. Priority is the apparent magnitude from absmag, or the fixed rank if absmag is NaN.
+  function add(text, kind, x, y, z, absmag, maxDist = Infinity, minDist = 0, rank = 0, radius = 0) {
+    items.push({ rank, radius, text: KIND[kind].upper ? text.toUpperCase() : text, kind, x, y, z, absmag, maxDist, minDist, slot: -1, sx: 0, sy: 0, vis: 0 });
     return items.length - 1;
   }
   function paint(slot, it) {
@@ -133,7 +133,9 @@ export function initLabels(gpu, globalsBuf, getScale) {
       if (vz <= 0) continue;
       const sx = ((dx * cam.right[0] + dy * cam.right[1] + dz * cam.right[2]) * f / asp / vz * 0.5 + 0.5) * W, sy = (0.5 - (dx * cam.up[0] + dy * cam.up[1] + dz * cam.up[2]) * f / vz * 0.5) * H;
       const o = live * 12, w = slotW[s] * pxScale, h = SH * pxScale;
-      out[o] = Math.round(sx + (k.centre ? -w / 2 : k.dx * pxScale)); out[o + 1] = Math.round(sy + k.dy * pxScale - h / 2); out[o + 2] = w; out[o + 3] = h;
+      // an extended object keeps its label clear of its own light (up to a third of the view away)
+      const clear = it.radius > 0 ? Math.min(it.radius / Math.sqrt(dx * dx + dy * dy + dz * dz) * f * H * 0.42, H * 0.33) : 0;
+      out[o] = Math.round(sx + (k.centre ? -w / 2 : k.dx * pxScale)); out[o + 1] = Math.round(sy + k.dy * pxScale + clear - h / 2); out[o + 2] = w; out[o + 3] = h;
       out[o + 4] = k.colour[0]; out[o + 5] = k.colour[1]; out[o + 6] = k.colour[2]; out[o + 7] = slotAlpha[s] * kindGain[it.kind] * 0.6;
       out[o + 8] = (s % COLS) / COLS; out[o + 9] = Math.floor(s / COLS) / (SLOTS / COLS); out[o + 10] = slotW[s] / (SW * COLS); out[o + 11] = 1 / (SLOTS / COLS);
       live++;

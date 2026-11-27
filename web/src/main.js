@@ -82,7 +82,7 @@ async function main() {
     if (np) labels.add(c.name, 'con', cx / n * 60, cy / n * 60, cz / n * 60, NaN, Infinity, 0, 3.5);
   }
   for (const s of names.stars) if (s[0]) labels.add(s[0] === 'Sol' ? 'Sun' : s[0], 'star', s[2], s[3], s[4], s[5]);
-  gal.names.forEach((n, i) => { if (n[1]) labels.add(n[0], 'galaxy', gal.pos(i, 0), gal.pos(i, 1), gal.pos(i, 2), gal.absmag(i), Infinity, gal.radius(i) * 1.2); });
+  gal.names.forEach((n, i) => { if (n[1]) labels.add(n[0], 'galaxy', gal.pos(i, 0), gal.pos(i, 1), gal.pos(i, 2), gal.absmag(i), Infinity, gal.radius(i) * 1.2, 0, gal.radius(i)); });
   const show = { lines: true, names: true, proc: true };
   const labelLimit = { star: 0, con: 0, body: 0, deep: 0, galaxy: 0 };
   const kindGain = { star: 1, con: 1, body: 1, deep: 1, galaxy: 1 };
