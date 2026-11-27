@@ -263,7 +263,8 @@ struct VO {
       let ay = cross(n, ax);
       let q = vec3f(dot(hit, ax), dot(hit, ay), 0.0);
       var Ps = P; Ps.armC *= smoothstep(10.0, 60.0, i.prm.w);
-      let v = galEmit(q, Ps, f32(i.id.y & 1023u), select(0.0, 1.0, i.prm.w > 40.0), 10.0, 1.0 / (i.prm.w * G.pxScale));
+      // fine structure comes in gradually with size, so a small galaxy is a smooth smudge and never a few noise cells
+      let v = galEmit(q, Ps, f32(i.id.y & 1023u), smoothstep(45.0, 220.0, i.prm.w), 10.0, 1.0 / (i.prm.w * G.pxScale));
       // the bulge's share of v, exactly as galEmit adds it (outer cut included: without it the difference goes
       // negative past r = 1 and the disc ends in a hard edge)
       let rq = dot(q.xy, q.xy);

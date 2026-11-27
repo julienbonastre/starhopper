@@ -38,7 +38,7 @@ const CORE = 6.5;     // ... up to this sigma in CSS pixels
   // energy in CSS-pixel units: exposure * 10^(-0.4 m), m = absmag + 5 log10(d / 10 pc)
   let e = G.exposure * L.gain * exp(-0.9210340 * absmag) * 100.0 / d2;
   var s0 = L.sigma0 * G.pxScale;
-  if (L.sigma0 > 0.9) { s0 *= 0.75 + 1.3 * fract(f32((s.x * 7u + s.y * 13u + s.z * 29u) & 1023u) / 1024.0 * 7.13); }   // galaxies come in sizes
+  if (L.sigma0 > 0.9) { s0 *= 0.85 + 0.55 * fract(f32((s.x * 7u + s.y * 13u + s.z * 29u) & 1023u) / 1024.0 * 7.13); }   // galaxies come in sizes
   // A star's disc grows with its brightness only so far (CORE pixels): beyond that it would read as a ball. The
   // rest shows as glare, a wide soft halo whose reach grows with the logarithm of the excess.
   let ep = e * G.pxScale * G.pxScale;
@@ -73,7 +73,7 @@ const CORE = 6.5;     // ... up to this sigma in CSS pixels
   let halo = i.prm.w / (1.0 + r2 * 0.35) * q * q;
   // faint wide skirt on bright stars, fading to zero at the quad edge
   let skirt = 0.035 / (1.0 + r2 * r2 * 0.08) * max(0.0, 1.0 - r2 / 12.96) * smoothstep(1.2, 3.0, i.prm.y / G.pxScale);
-  return vec4f(i.col * i.prm.x * (core + skirt) + mix(i.col, vec3f(1.0), 0.8) * halo, 1.0);
+  return vec4f(i.col * i.prm.x * (core + skirt) + vec3f(1.0, 0.98, 0.95) * halo, 1.0);
 }`;
 
 const MAX_DRAW = 2048, FETCHES = 8, SCAN_PER_FRAME = 60000, UPLOAD_PER_FRAME = 400_000;   // bytes

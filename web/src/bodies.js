@@ -290,7 +290,7 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
     const R = radius[EARTH], d = R + altKm * KM_PC;
     const p = [ex + r[0] * d, ey + r[1] * d, ez + r[2] * d];
     const k = S[0] * r[0] + S[1] * r[1] + S[2] * r[2], f = unit([S[0] - r[0] * k, S[1] - r[1] * k, S[2] - r[2] * k]);
-    const c = Math.cos(0.52), s = Math.sin(0.52);
+    const c = Math.cos(0.4), s = Math.sin(0.4);
     return { p, at: [p[0] + (f[0] * c - r[0] * s) * R, p[1] + (f[1] * c - r[1] * s) * R, p[2] + (f[2] * c - r[2] * s) * R], up: r };
   }
   // The night sky from above the Earth's dark side: looking at whichever showpiece of the sky is highest at local

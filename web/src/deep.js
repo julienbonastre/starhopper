@@ -39,7 +39,8 @@ fn vnoise(p: vec3f) -> f32 {
   o.uv = corner * half; o.ndc = o.pos.xy;
   return o;
 }
-fn ign(p: vec2f) -> f32 { return 0.25 + 0.5 * fract(52.9829189 * fract(dot(p, vec2f(0.06711056, 0.00583715)))); }
+// per-pixel offset along the ray: plain white noise (no lattice to show through), smoothed away by the wide blit
+fn ign(p: vec2f) -> f32 { var q = fract(vec3f(p.xyx) * vec3f(0.1031, 0.1030, 0.0973)); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 const HA = vec3f(1.0, 0.16, 0.26);        // hydrogen alpha with a little H beta: the pink of emission nebulae
 const O3 = vec3f(0.25, 0.95, 0.80);       // doubly ionised oxygen: teal
 const DUSTBLUE = vec3f(0.36, 0.56, 1.0);  // starlight scattered by dust
@@ -63,7 +64,7 @@ const YOUNGSTAR = vec3f(0.72, 0.82, 1.0);
       let h = sqrt(1.0 - p2);
       let t0 = max(b - h, 0.0); let t1 = b + h;
       if (t1 > t0) {
-        const N = 14.0;
+        const N = 18.0;
         let jit = ign(i.pos.xy);
         var acc = vec3f(0.0); var tr = 1.0;
         let dt = (t1 - t0) / N;
@@ -105,11 +106,11 @@ const YOUNGSTAR = vec3f(0.72, 0.82, 1.0);
               // emission: pink hydrogen, turning teal and far brighter toward the stars that light it
               let core = exp(-rr * rr / 0.022);
               // (the gas right around the camera is left out: from inside, it is the far walls that are seen)
-              em = (HA * body * cloud * (0.12 + 3.4 * rim) + vec3f(0.80, 1.0, 0.92) * 7.0 * core * (0.35 + cloud)) * (1.0 / 0.42) * smoothstep(0.0, 0.4, tc);
+              em = (HA * body * cloud * (0.2 + 4.2 * rim) + mix(vec3f(1.0, 0.45, 0.5), vec3f(0.62, 1.0, 0.88), cloud) * 3.2 * core * (0.3 + cloud)) * (1.0 / 0.42) * smoothstep(0.0, 0.4, tc);
             } else {
               // reflection: blue starlight on dust, in fine combed wisps
               let wisp = pow(1.0 - abs(2.0 * vnoise(vec3f(w2.x * 3.5, w2.y * 0.9, w2.z * 0.9)) - 1.0), 3.0);
-              em = mix(DUSTBLUE, vec3f(0.62, 0.76, 1.0), cloud) * body * (0.04 + 1.3 * cloud * (0.35 + wisp)) * select(1.0 / 0.6, 1.0 / 0.2, kind == 6.0);
+              em = mix(DUSTBLUE, vec3f(0.62, 0.76, 1.0), cloud) * body * (0.04 + 1.3 * cloud * (0.35 + wisp)) * (1.0 / 1.6);
               dust *= 0.4;
             }
           }
