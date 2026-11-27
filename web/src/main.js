@@ -12,6 +12,7 @@ import { POSES, setPose, place } from './poses.js';
 import { initBodies } from './bodies.js';
 import { initDeep } from './deep.js';
 import { initMarkers } from './markers.js';
+import { initBeyond } from './beyond.js';
 import { setSound, updateSound } from './audio.js';
 import { PLANETS, orbitPoints, jdNow } from './solar.js';
 
@@ -42,6 +43,7 @@ async function main() {
     initPoints(gpu, globalsBuf, base + 'galaxies/', quality, { budget: 400_000, track: false, magOff: 40, sigma0: 1.0 }),
     initGalaxies(gpu, globalsBuf, base, quality)]);
   const post = initPost(gpu, quality);
+  const beyond = initBeyond(gpu, globalsBuf, gal.noise, [28, 22, 16][LEVEL]);
   // nebulae, clusters and exoplanet hosts arrive after the first frame: until then these stand in for them
   let deep = { count: 0, near: { id: -1, edge: Infinity }, update() {}, draw() {}, hasBig: () => false }, markers = { count: 0, update() {}, draw() {} };
   // the planets are placed for today's date (?jd= pins it, for repeatable renders)
@@ -306,6 +308,7 @@ async function main() {
     stars.update(magLimit);
     galPts.update(galLimit);
     gal.update(W, H, pxScale, pointGain, starGain);
+    beyond.update(pointGain);
     deep.update((1 / Math.tan(cam.fov / 2)) * (H / pxScale) * 0.5);
     exoFade += ((show.exo ? 1 : 0) - exoFade) * (1 - Math.exp(-dt * 5));
     markers.update(exoFade);
@@ -344,6 +347,7 @@ async function main() {
     if (!sk.gal) gal.draw(pass, hadVol, sk);
     if (!sk.deep) deep.draw(pass);
     if (!sk.galPts) galPts.draw(pass, pointGain);
+    if (!sk.beyond) beyond.draw(pass);
     if (!sk.lines) lines.draw(pass);
     if (!sk.stars) stars.draw(pass, starGain);
     markers.draw(pass);
