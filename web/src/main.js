@@ -298,7 +298,8 @@ async function main() {
   };
   $('ctxgo').onclick = () => { $('ctx').hidden = true; flight.menu = false; if (target.on) { (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9)); flash(target.name); } };
   // the bar under a target: go there (or stop going there), or let it go
-  $('tbgo').onclick = () => { if (flight.goto) cancelGoto(); else if (target.on) { (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9)); flash(target.name); } };
+  // Stop means stop: without this a throttle held up to hurry the trip would carry straight on
+  $('tbgo').onclick = () => { if (flight.goto) { cancelGoto(); halt(); } else if (target.on) { (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9)); flash(target.name); } };
   // The info card: what the catalogue says about the target, then a few lines and a picture from Wikipedia if it
   // has a page that is plainly about this object. Built with text nodes only: nothing fetched is parsed as HTML.
   let infoRow = null, infoAt = 0;
