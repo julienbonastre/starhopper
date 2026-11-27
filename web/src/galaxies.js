@@ -1,0 +1,521 @@
+// Detailed galaxies: every catalogued galaxy with a known size, tilt and Hubble type (and the Milky Way itself).
+// Far away each is a point; closer, a cheap analytic disc-and-bulge impostor; the few that fill the view are
+// ray-marched as volumes with spiral arms, star-forming knots and dust lanes (at reduced resolution).
+// The same light model, normalised to the catalogued luminosity, is used at every tier so they cross-fade cleanly.
+import { GLOBALS, HDR } from './gpu.js';
+import { cam } from './camera.js';
+
+// Value noise, read from a small repeating 3D texture of random values (one filtered fetch instead of eight hashes).
+// The fill-star shader never asks for detail, so it gets a stub and needs no texture.
+const NOISE_N = 64;
+const NOISE_TEX = /*wgsl*/`
+@group(0) @binding(2) var noiseTex: texture_3d<f32>;
+@group(0) @binding(3) var noiseSmp: sampler;
+fn vnoise(p: vec3f) -> f32 {
+  let i = floor(p); var f = p - i; f = f * f * (3.0 - 2.0 * f);
+  return textureSampleLevel(noiseTex, noiseSmp, (i + f + 0.5) / ${NOISE_N}.0, 0.0).r;
+}
+`;
+const NOISE_STUB = /*wgsl*/`fn vnoise(p: vec3f) -> f32 { return 0.5; }
+`;
+const MODEL = /*wgsl*/`
+struct GalP { fb: f32, rb: f32, h: f32, hz: f32, pitch: f32, arms: f32, armC: f32, clump: f32, bar: f32, qz: f32, wind: f32, phase: f32 }
+// Hubble sequence: 0 E, 1 S0, 2 Sa, 3 Sab, 4 Sb, 5 Sbc, 6 Sc, 7 Scd, 8 Sd/Sm, 9 Irr
+const FB = array<f32, 10>(1.0, 0.55, 0.42, 0.34, 0.26, 0.18, 0.12, 0.08, 0.04, 0.0);
+const PITCH = array<f32, 10>(9.0, 9.0, 9.0, 11.0, 14.0, 17.0, 20.0, 24.0, 28.0, 30.0);
+const ARMC = array<f32, 10>(0.0, 0.0, 0.5, 0.6, 0.72, 0.8, 0.85, 0.7, 0.12, 0.0);
+const CLUMP = array<f32, 10>(0.0, 0.0, 0.15, 0.2, 0.3, 0.4, 0.5, 0.65, 0.9, 1.0);
+fn galParams(t: u32, flat: f32, seed: u32) -> GalP {
+  let b = min(t & 15u, 9u);
+  var p: GalP;
+  p.fb = FB[b]; p.armC = ARMC[b]; p.clump = CLUMP[b];
+  p.rb = select(0.045 + 0.12 * p.fb, 0.17, b == 0u);
+  p.h = 0.27; p.hz = select(0.022, 0.1, b == 9u); if (b == 1u) { p.hz = 0.035; }
+  p.pitch = 1.0 / tan(radians(PITCH[b]));
+  p.arms = select(2.0, 4.0, ((seed >> 3u) & 3u) == 0u && b >= 5u);
+  p.bar = f32((t >> 4u) & 3u) * select(1.0, 0.5, ((t >> 4u) & 3u) == 2u);
+  p.qz = flat;
+  p.wind = select(-1.0, 1.0, (seed & 2u) != 0u);
+  p.phase = f32((seed >> 8u) & 255u) * 0.0246;
+  return p;
+}
+// Surface brightness is shown as the flux falling on one pixel of a reference view (1000 px tall, 60 degrees), so the
+// balance between stars and extended light does not depend on the window size.
+const OMEGA = 1.3333e-6;
+const OLD = vec3f(1.0, 0.86, 0.68);
+const YOUNG = vec3f(0.60, 0.76, 1.0);
+const HII = vec3f(1.0, 0.28, 0.42);
+// emission (rgb, luminosity per unit volume for a galaxy of unit radius and unit luminosity) and dust (a) at q.
+// Fractal noise for structure, five octaves from about a thirteenth of the radius down. Each octave is used only
+// where it can be seen for what it is: not so close to the camera (t, in radii) that one cell spans the sky, and not
+// so far that a cell is smaller than a pixel (foot: the size of a pixel there, in radii). Each is rotated against
+// the last so the lattices never line up. Returns the first three octaves and the weighted sum, all around 0.5.
+fn galNoise(q: vec3f, sd: f32, t: f32, foot: f32) -> vec4f {
+  var p = vec3f(q.x * 0.8 - q.y * 0.6, q.x * 0.6 + q.y * 0.8, q.z * 2.2) * 13.0 + sd;
+  var c = 1.0 / 13.0; var amp = 0.5; var sum = 0.0; var fine = 0.0;
+  var o = vec3f(0.5);
+  for (var i = 0; i < 5; i++) {
+    let w = smoothstep(c * 1.2, c * 3.5, t) * (1.0 - smoothstep(c * 0.25, c * 0.6, foot));
+    if (w > 0.0) { let n = (vnoise(p) - 0.5) * w; sum += amp * n; if (i < 3) { o[i] = 0.5 + n; } if (i >= 2) { fine += amp * n; } }
+    p = vec3f(p.x * 0.54 + p.y * 0.84, -p.x * 0.84 + p.y * 0.54, p.z) * 2.2 + 9.1; c /= 2.2; amp *= 0.82;
+  }
+  return vec4f(0.5 + (o.x - 0.5) * 0.6 + (o.y - 0.5) * 0.4, o.z, 0.5 + fine * 1.7, 0.5 + sum);
+}
+// detail 0 skips the noise (used by the impostor's bulge-only path and by low settings).
+// qn: where the noise is looked up (the volume march keeps it on unjittered shells, so cloud detail finer than a
+// step survives; everything smooth uses the jittered q)
+fn galEmit(q: vec3f, qn: vec3f, p: GalP, sd: f32, detail: f32, t: f32, foot: f32) -> vec4f {
+  let r2 = dot(q.xy, q.xy); let r = sqrt(r2);
+  let s2 = r2 + q.z * q.z / (p.qz * p.qz);
+  let bul = p.fb / (9.8696 * p.qz * p.rb * p.rb * p.rb) * pow(1.0 + s2 / (p.rb * p.rb), -2.0) * (1.0 - smoothstep(1.0, 1.7, sqrt(s2)));
+  if (p.fb >= 0.999) { return vec4f(OLD * bul, 0.0); }
+  let az = abs(q.z);
+  let disc = (1.0 - p.fb) / (12.566 * p.h * p.h * p.hz) * exp(-r / p.h - az / p.hz) * (1.0 - smoothstep(0.75, 1.65, r));
+  if (disc < 1e-4 && bul < 1e-4) { return vec4f(0.0); }
+  let th = atan2(q.y, q.x) * p.wind;
+  var n1 = 0.5; var n2 = 0.5; var nf = 0.5; var nc = 0.5; var wob = 0.0;
+  // real arms are not ruled spirals: a slow wander in phase bends, forks and breaks them (on a lattice turned
+  // away from the axes)
+  if (detail > 0.0) { wob = (vnoise(vec3f(q.x * 1.9 + q.y * 1.6, q.y * 1.9 - q.x * 1.6, 0.37) + sd * 1.3) - 0.5) * 3.0 * detail; }
+  let ph = p.arms * (th - log(max(r, 0.02)) * p.pitch) + p.phase + wob;
+  let c = 0.5 + 0.5 * cos(ph);
+  let c2 = 0.5 + 0.5 * cos(2.0 * ph + 1.3 - wob * 1.6);          // spurs and secondary arms at twice the count
+  let inner = smoothstep(0.04, 0.22, r) * (1.0 - 0.6 * smoothstep(0.8, 1.4, r));     // arms calm down toward the rim
+  let c4 = c * c * c * c;
+  let arm = c4 * 2.85 + c2 * c2 * 0.59;                         // main arms + spurs; mean 1 around the circle
+  if (detail > 0.0) { let n = galNoise(qn, sd, t, foot); n1 = n.x; n2 = n.y; nc = n.z; nf = n.w; }
+  let clumps = mix(1.0, 0.25 + 1.5 * n1, p.clump * (0.5 + 0.5 * detail));
+  // star formation is patchy along the arms: they break into bright stretches and gaps
+  let knot = mix(1.0, 0.3 + 1.4 * smoothstep(0.3, 0.7, n1), detail);
+  // ... and the whole disc is mottled with star clouds a few hundred parsecs across
+  let discE = disc * mix(1.0, arm * knot, p.armC * inner) * clumps * mix(1.0, clamp(0.2 + 0.9 * nf + 0.7 * nc, 0.2, 2.2), detail);
+  let fy = clamp(c4 * p.armC * inner * 0.95 + p.clump * 0.45 - 0.1, 0.0, 1.0);
+  var col = OLD * bul + discE * mix(OLD * 0.95, YOUNG, fy);
+  col += HII * disc * smoothstep(0.62, 0.8, n2) * arm * inner * (p.armC + p.clump * 0.6) * 1.5 * detail;
+  if (p.bar > 0.0) {
+    let a = p.phase * 0.5; let xb = vec2f(q.x * cos(a) + q.y * sin(a), -q.x * sin(a) + q.y * cos(a));
+    col += OLD * p.bar * (1.0 - p.fb) * 2.6 * exp(-(xb.x * xb.x) / 0.045 - (xb.y * xb.y) / 0.0035 - q.z * q.z / 0.003);
+  }
+  let cd = 0.5 + 0.5 * cos(ph + 0.85);
+  // dust: a thin, patchy layer. Its mid-plane wanders and its density comes in clouds, so that seen edge-on (or from
+  // inside) the lane breaks up into rifts and windows instead of one ruled line.
+  let zd = abs(q.z + (n1 - 0.5) * p.hz * 1.3 * detail);
+  let cloud = mix(1.0, 5.0 * smoothstep(0.46, 0.64, nf * 0.45 + nc * 0.55), detail);
+  let dust = (1.0 - p.fb) * exp(-r / (p.h * 1.5) - zd / (p.hz * 0.7)) * (0.2 + 2.4 * cd * cd * cd * cd * inner * p.armC + p.clump) * cloud * (1.0 - smoothstep(1.0, 1.5, r));
+  return vec4f(col, dust);
+}
+`;
+
+
+// Procedural fill stars: where no catalogue reaches, individual stars are drawn from the host galaxy's own light
+// model. They live on world-anchored lattices (one per luminosity class), so the same stars are always in the same
+// place; each lattice is only as wide as its class can be seen. Inside the Milky Way a star is dropped wherever the
+// real catalogue is complete (it would be brighter than magnitude 10.5 from the Sun).
+const FILL = /*wgsl*/`
+${GLOBALS}
+${NOISE_STUB}
+${MODEL}
+struct Vol { c: vec3f, R: f32, ax: vec3f, lum: f32, ay: vec3f, flat: f32, n: vec3f, weight: f32, id: vec4u }
+struct Vols { v: array<Vol, 4>, steps: f32, count: f32, kappa: f32, pix: f32 }
+@group(0) @binding(1) var<uniform> V: Vols;
+struct Fill { cell: vec3i, n: i32, frac: vec3f, size: f32, sun: vec3f, mag: f32, per: u32, level: u32, expect: f32, gain: f32, host: u32, isMW: u32, p0: u32, p1: u32 }
+@group(1) @binding(0) var<uniform> F: Fill;
+struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f, @location(1) col: vec3f, @location(2) prm: vec2f }
+fn pcg3(v: vec3u) -> vec3u {
+  var x = v * 1664525u + 1013904223u;
+  x.x += x.y * x.z; x.y += x.z * x.x; x.z += x.x * x.y; x ^= x >> vec3u(16u);
+  x.x += x.y * x.z; x.y += x.z * x.x; x.z += x.x * x.y; return x;
+}
+fn bvColour(bv: f32) -> vec3f {
+  let t = 4600.0 * (1.0 / (0.92 * bv + 1.7) + 1.0 / (0.92 * bv + 0.62)); let x = t / 100.0;
+  var c: vec3f;
+  if (x <= 66.0) { c.r = 1.0; c.g = clamp(0.390082 * log(x) - 0.631841, 0.0, 1.0); }
+  else { c.r = clamp(1.292936 * pow(x - 60.0, -0.1332047), 0.0, 1.0); c.g = clamp(1.129891 * pow(x - 60.0, -0.0755148), 0.0, 1.0); }
+  if (x >= 66.0) { c.b = 1.0; } else if (x <= 19.0) { c.b = 0.0; } else { c.b = clamp(0.543207 * log(x - 10.0) - 1.196254, 0.0, 1.0); }
+  c = pow(c, vec3f(2.2));
+  return mix(vec3f(1.0), c / dot(c, vec3f(0.2126, 0.7152, 0.0722)), 1.25);
+}
+@vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VO {
+  var o: VO; o.pos = vec4f(0.0, 0.0, 2.0, 1.0);
+  let corner = vec2f(f32(vi & 1u) * 2.0 - 1.0, f32(vi >> 1u) * 2.0 - 1.0);
+  let ci = ii / F.per; let n = u32(F.n);
+  let g = vec3i(i32(ci % n), i32((ci / n) % n), i32(ci / (n * n))) - F.n / 2;
+  let wc = F.cell + g;
+  let h = pcg3(bitcast<vec3u>(wc) + vec3u(ii % F.per, F.level * 7919u, 0u));
+  let h2 = pcg3(h);
+  let u1 = vec3f(h) / 4294967296.0; let u2 = vec3f(h2) / 4294967296.0;
+  let rel = (vec3f(g) + u1 - F.frac) * F.size;
+  // local density of the host galaxy, relative to the solar neighbourhood
+  let v = V.v[F.host];
+  let P = galParams(v.id.x, v.flat, v.id.y);
+  let w = rel - v.c;
+  let qf = vec3f(dot(w, v.ax), dot(w, v.ay), dot(w, v.n)) / v.R;
+  let e = galEmit(qf, qf, P, 0.0, 0.0, 0.0, 1.0);
+  let rho = dot(e.rgb, vec3f(0.33)) * v.lum / v.R / 0.02296;
+  if (u2.x >= F.expect * rho) { return o; }
+  var absmag = F.mag + (u2.y - 0.5) * 3.0;
+  // colour: main sequence, with red giants among the brighter classes and a blue excess in the arms
+  var bv = clamp(0.15 * absmag - 0.05, -0.28, 1.5);
+  if (absmag < 2.5 && u2.z < 0.4) { bv = 0.95 + 0.5 * u1.x; }
+  let d2 = max(dot(rel, rel), 1e-12);
+  var gain = F.gain * (1.0 - smoothstep(0.8, 1.0, max(abs(f32(g.x)), max(abs(f32(g.y)), abs(f32(g.z)))) / f32(F.n / 2)));
+  if (F.isMW == 1u) {
+    let ds = rel - F.sun; let m = absmag + 2.5 * log(max(dot(ds, ds), 1e-6)) / 2.302585 - 5.0;   // magnitude seen from the Sun
+    gain *= smoothstep(10.0, 11.0, m);
+  }
+  let en = G.exposure * gain * G.proc * exp(-0.9210340 * absmag) * 100.0 / d2;
+  let s0 = 0.62 * G.pxScale;
+  let sigma = min(max(s0, sqrt(en * G.pxScale * G.pxScale / (6.2831853 * 2.6))), 26.0 * G.pxScale);
+  let peak = min(en * G.pxScale * G.pxScale / (6.2831853 * sigma * sigma), 40.0);
+  let p = project(rel);
+  if (peak < 0.0035 || p.z > 1.0) { return o; }
+  let half = sigma * clamp(sqrt(2.0 * log(max(peak / 0.0008, 1.2))), 0.9, 3.6) + 1.0;   // snug around faint stars
+  o.pos = vec4f(p.xy + corner * half * 2.0 / G.viewport, 0.5, 1.0);
+  o.uv = corner * half; o.col = bvColour(bv); o.prm = vec2f(peak, sigma);
+  return o;
+}
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  let r2 = dot(i.uv, i.uv) / (i.prm.y * i.prm.y);
+  let skirt = 0.035 / (1.0 + r2 * r2 * 0.08) * max(0.0, 1.0 - r2 / 12.96) * smoothstep(1.2, 3.0, i.prm.y / G.pxScale);
+  return vec4f(i.col * i.prm.x * (exp(-0.5 * r2) + skirt), 1.0);
+}`;
+// luminosity classes: absolute magnitude, cell size (pc), stars per cell, and stars expected per slot near the Sun
+// (from the solar-neighbourhood luminosity function: about 8e-3, 2.5e-3, 1.4e-4 and 4e-6 stars per cubic parsec)
+const CLASSES = [{ mag: 5, size: 2.2, per: 1, dens: 8e-3 }, { mag: 2, size: 8, per: 2, dens: 2.5e-3 }, { mag: -1, size: 32, per: 4, dens: 1.4e-4 }, { mag: -4, size: 130, per: 6, dens: 4e-6 }];
+
+const LAYER = /*wgsl*/`
+struct Layer { camQ: vec3i, pad0: i32, camF: vec3f, step: f32, far: vec3f, magOff: f32, sigma0: f32, gain: f32, vol: vec4i }
+@group(1) @binding(0) var<uniform> L: Layer;
+`;
+const IMPOSTOR = /*wgsl*/`
+${GLOBALS}
+${LAYER}
+${NOISE_TEX}
+${MODEL}
+struct VO {
+  @builtin(position) pos: vec4f, @location(0) uv: vec2f,
+  @location(1) @interpolate(flat) c: vec3f, @location(2) @interpolate(flat) n: vec3f,
+  @location(3) @interpolate(flat) prm: vec4f,          // radius, flux at exposure, impostor weight, size in CSS px
+  @location(4) @interpolate(flat) id: vec3u,            // type, seed, unused
+  @location(5) @interpolate(flat) psf: vec2f,           // peak, sigma (point tier)
+}
+@vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32, @location(0) s: vec4u, @location(1) g: vec4f, @location(2) flat: f32, @location(3) seed: u32) -> VO {
+  var o: VO;
+  let corner = vec2f(f32(vi & 1u) * 2.0 - 1.0, f32(vi >> 1u) * 2.0 - 1.0);
+  let rel = (vec3f(vec3i(s.xyz) - L.camQ) - L.camF) * L.step + L.far;
+  let d2 = max(dot(rel, rel), 1e-6); let dist = sqrt(d2);
+  let absmag = f32(s.w >> 16u) * 0.001 - 40.0;
+  let lum = exp(-0.9210340 * absmag) * 100.0;
+  let e = G.exposure * lum / d2;
+  let hcss = G.viewport.y / G.pxScale;
+  let sizePx = g.x / dist * G.focal * hcss * 0.5;
+  // impostor weight: 0 while too small to resolve; 0 again when the volume pass has taken this galaxy over
+  var w = smoothstep(1.3, 3.5, sizePx) * G.proc;
+  let inVol = i32(ii) == L.vol.x || i32(ii) == L.vol.y || i32(ii) == L.vol.z || i32(ii) == L.vol.w;
+  if (inVol) { w *= 1.0 - smoothstep(170.0, 300.0, sizePx); }
+  let ptGain = (1.0 - smoothstep(1.3, 3.5, sizePx) * G.proc) * select(1.0, 0.0, ii == 0u && G.proc < 0.5);
+  let s0 = L.sigma0 * G.pxScale;
+  let ep = e * ptGain * L.gain * G.pxScale * G.pxScale;
+  let sigma = min(max(s0, sqrt(ep / (6.2831853 * 2.6))), 26.0 * G.pxScale);
+  let peak = min(ep / (6.2831853 * sigma * sigma), 40.0);
+  let p = project(rel);
+    // small impostors are lifted like the points they grow out of (L.gain), large ones keep their true surface brightness
+  let boost = mix(min(L.gain, 5.0), 1.0, smoothstep(3.0, 40.0, sizePx));
+  let omega = OMEGA;
+  if (G.exposure * G.diffuse * boost * lum / (g.x * g.x) * omega * 30.0 < 0.002) { w = 0.0; }
+  if ((peak < 0.0035 && w <= 0.0) || p.z > 1.0) { o.pos = vec4f(0.0, 0.0, 2.0, 1.0); return o; }
+  let half = max(sigma * 3.6 + 1.0, select(0.0, sizePx * 1.75 * G.pxScale, w > 0.0));
+  o.pos = vec4f(p.xy + corner * half * 2.0 / G.viewport, 0.5, 1.0);
+  o.uv = corner * half;
+  o.c = rel; o.prm = vec4f(g.x, G.exposure * G.diffuse * boost * lum / (g.x * g.x), w, sizePx);
+  o.id = vec3u((s.w >> 8u) & 255u, seed, 0u);
+  o.psf = vec2f(peak, sigma);
+  // flat is needed in the fragment stage too: carried in n's length (n is unit, so scale it)
+  o.n = g.yzw * (1.0 + flat);
+  return o;
+}
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  var col = vec3f(0.0);
+  let flat = length(i.n) - 1.0; let n = i.n / (1.0 + flat);
+  let P = galParams(i.id.x, flat, i.id.y);
+  if (i.psf.x > 0.0) {
+    let r2 = dot(i.uv, i.uv) / (i.psf.y * i.psf.y);
+    col += mix(OLD, YOUNG, 0.25 + 0.5 * P.armC) * i.psf.x * exp(-0.5 * r2);
+  }
+  if (i.prm.z > 0.0) {
+    // view ray through this pixel
+    let ndc = (i.pos.xy / G.viewport * 2.0 - 1.0) * vec2f(1.0, -1.0);
+    let d = normalize(G.right * ndc.x * G.aspect / G.focal + G.up * ndc.y / G.focal + G.fwd);
+    let R = i.prm.x;
+    let omega = OMEGA;
+    // disc: thin-sheet column where the ray crosses the mid-plane (tilt clamped so edge-on discs keep a thickness)
+    var k = dot(d, n); let ka = max(abs(k), 0.12); k = select(-ka, ka, k >= 0.0);
+    let t = dot(i.c, n) / k;
+    let hit = (d * t - i.c) / R;
+    // spheroid: projected onto the sky plane through the centre
+    let tc = dot(i.c, d); let off = (d * tc - i.c) / R;
+    let sinI = sqrt(max(1.0 - dot(d, n) * dot(d, n), 0.0));
+    let along = dot(off, n) / max(sinI, 1e-3);                              // along the projected minor axis
+    let across2 = max(dot(off, off) - along * along, 0.0);
+    let qa = sqrt(max(1.0 - sinI * sinI * (1.0 - P.qz * P.qz), 0.01));     // apparent axis ratio of the spheroid
+    let rr = across2 + along * along / (qa * qa);
+    var em = OLD * P.fb / (6.2831853 * qa * P.rb * P.rb) * pow(1.0 + rr / (P.rb * P.rb), -1.5) * (1.0 - smoothstep(1.0, 1.7, sqrt(rr)));
+    if (P.fb < 0.999 && t > 0.0) {
+      // face-on basis in the disc plane
+      let ax = normalize(cross(n, select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), abs(n.x) > 0.7)));
+      let ay = cross(n, ax);
+      let q = vec3f(dot(hit, ax), dot(hit, ay), 0.0);
+      var Ps = P; Ps.armC *= smoothstep(10.0, 60.0, i.prm.w);
+      // fine structure comes in gradually with size, so a small galaxy is a smooth smudge and never a few noise cells
+      let v = galEmit(q, q, Ps, f32(i.id.y & 1023u), smoothstep(45.0, 220.0, i.prm.w), 10.0, 1.0 / (i.prm.w * G.pxScale));
+      // the bulge's share of v, exactly as galEmit adds it (outer cut included: without it the difference goes
+      // negative past r = 1 and the disc ends in a hard edge)
+      let rq = dot(q.xy, q.xy);
+      let spher = OLD * P.fb / (9.8696 * P.qz * P.rb * P.rb * P.rb) * pow(1.0 + rq / (P.rb * P.rb), -2.0) * (1.0 - smoothstep(1.0, 1.7, sqrt(rq)));
+      em += max(v.rgb - spher, vec3f(0.0)) * 2.0 * P.hz / ka * exp(-v.a * 12.0 * P.hz / ka);
+    }
+    col += em * i.prm.y * omega * i.prm.z;
+  }
+  return vec4f(col, 1.0);
+}`;
+
+const VOLUME = /*wgsl*/`
+${GLOBALS}
+${NOISE_TEX}
+${MODEL}
+struct Vol { c: vec3f, R: f32, ax: vec3f, lum: f32, ay: vec3f, flat: f32, n: vec3f, weight: f32, id: vec4u }
+struct Vols { v: array<Vol, 4>, steps: f32, count: f32, kappa: f32, pix: f32 }
+@group(0) @binding(1) var<uniform> V: Vols;
+struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f }
+@vertex fn vs(@builtin(vertex_index) i: u32) -> VO {
+  var o: VO; let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u)) * 2.0 - 1.0;
+  o.pos = vec4f(p, 0.0, 1.0); o.ndc = p; return o;
+}
+fn ign(p: vec2f) -> f32 { return 0.25 + 0.5 * fract(52.9829189 * fract(dot(p, vec2f(0.06711056, 0.00583715)))); }
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  let d = normalize(G.right * i.ndc.x * G.aspect / G.focal + G.up * i.ndc.y / G.focal + G.fwd);
+  let omega = OMEGA;
+  let jit = ign(i.pos.xy);
+  var sum = vec3f(0.0);
+  let nv = u32(V.count);
+  for (var g = 0u; g < nv; g++) {
+    let v = V.v[g];
+    if (v.weight <= 0.0) { continue; }
+    // ray against the bounding sphere (radius 1.7 R), in units of R
+    let oc = -v.c / v.R;
+    let b = dot(oc, d); let cc = dot(oc, oc) - 2.89; let disc = b * b - cc;
+    if (disc <= 0.0) { continue; }
+    let sq = sqrt(disc);
+    var t0 = max(-b - sq, 0.0); var t1 = -b + sq;
+    if (t1 <= t0) { continue; }
+    let tSph = t1;
+    let P = galParams(v.id.x, v.flat, v.id.y);
+    let ro = vec3f(dot(oc, v.ax), dot(oc, v.ay), dot(oc, v.n));
+    let rd = vec3f(dot(d, v.ax), dot(d, v.ay), dot(d, v.n));
+    // discs: only the slab around the mid-plane (and the central bulge) holds anything worth sampling
+    if (P.fb < 0.999) {
+      let zs = max(P.hz * 7.0, P.rb * 2.2 * P.qz * step(0.01, P.fb) + 0.02);
+      if (abs(rd.z) > 1e-5) {
+        let ta = (-zs - ro.z) / rd.z; let tb = (zs - ro.z) / rd.z;
+        t0 = max(t0, min(ta, tb)); t1 = min(t1, max(ta, tb));
+      } else if (abs(ro.z) > zs) { continue; }
+      if (t1 <= t0) { continue; }
+    }
+    // From inside the disc the samples sit on spheres around the camera, crowded toward it: the same distances in
+    // every direction, so each one shows the clouds at that distance as they are. (Spacing them along each ray's own
+    // path through the slab would put them on planes parallel to the disc, which seen edge-on are ruled streaks.)
+    let within = t0 <= 0.0;
+    let N = V.steps;
+    var acc = vec3f(0.0); var tr = 1.0; var prev = t0;
+    let sd = f32(v.id.y & 1023u);
+    for (var s = 0.0; s < N; s += 1.0) {
+      var t: f32; var ts: f32; var dt: f32;
+      if (within) {
+        let x0 = s / N; let x1 = (s + 1.0) / N;
+        let e0 = tSph * x0 * x0 * x0; let e1 = min(tSph * x1 * x1 * x1, t1);
+        if (e1 <= e0) { break; }
+        dt = e1 - e0; t = e0 + dt * jit; ts = e0 + dt * 0.5;
+      } else {
+        let tn = t0 + (t1 - t0) * (s + 1.0) / N; t = t0 + (t1 - t0) * (s + jit) / N; dt = tn - prev; prev = tn;
+        ts = t0 + (t1 - t0) * (s + 0.5) / N;
+      }
+      var e = galEmit(ro + rd * t, ro + rd * ts, P, sd, 1.0, ts, ts * V.pix);
+      // the camera's own neighbourhood is left to individual stars (catalogued or fill): the model supplies only
+      // the light from farther off, which keeps the sky dark away from the plane
+      e = vec4f(e.rgb * smoothstep(0.0, 0.05, t), e.a);
+      let a = exp(-e.a * V.kappa * dt);
+      acc += tr * e.rgb * dt * (1.0 + a) * 0.5;
+      tr *= a;
+      if (tr < 0.01) { break; }
+    }
+    sum += acc * v.lum * omega * v.weight;
+  }
+  return vec4f(sum * G.exposure * G.diffuse * G.proc, 1.0);
+}`;
+const BLIT = /*wgsl*/`
+@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var smp: sampler;
+struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
+@vertex fn vs(@builtin(vertex_index) i: u32) -> VO { var o: VO; let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u)); o.pos = vec4f(p * 2.0 - 1.0, 0.0, 1.0); o.uv = vec2f(p.x, 1.0 - p.y); return o; }
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  // a wide tent over the reduced-resolution haze: the march's sampling pattern does not survive it
+  let t = 1.25 / vec2f(textureDimensions(src));
+  var c = textureSampleLevel(src, smp, i.uv, 0.0).rgb * 0.2;
+  c += (textureSampleLevel(src, smp, i.uv + t * vec2f(1.0, 0.4), 0.0).rgb + textureSampleLevel(src, smp, i.uv + t * vec2f(-1.0, -0.4), 0.0).rgb
+      + textureSampleLevel(src, smp, i.uv + t * vec2f(-0.4, 1.0), 0.0).rgb + textureSampleLevel(src, smp, i.uv + t * vec2f(0.4, -1.0), 0.0).rgb) * 0.2;
+  return vec4f(c, 1.0);
+}`;
+
+export async function initGalaxies(gpu, globalsBuf, base, quality) {
+  const { device, queue } = gpu;
+  const [meta, bin] = await Promise.all([fetch(base + 'galaxies.json').then((r) => r.json()), fetch(base + 'galaxies.bin').then((r) => r.arrayBuffer())]);
+  const N = meta.count, HALF = meta.half, STEP = meta.step, u = new Uint32Array(bin), f = new Float32Array(bin);
+  const inst = device.createBuffer({ size: bin.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+  queue.writeBuffer(inst, 0, bin);
+  const add = { color: { srcFactor: 'one', dstFactor: 'one' }, alpha: { srcFactor: 'one', dstFactor: 'one' } };
+  // the noise texture: seeded, so every visit sees the same galaxies
+  const noiseTex = device.createTexture({ size: [NOISE_N, NOISE_N, NOISE_N], dimension: '3d', format: 'r8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+  {
+    const d = new Uint8Array(NOISE_N ** 3); let a = 0x9e3779b9;
+    for (let i = 0; i < d.length; i++) { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; d[i] = (t ^ (t >>> 14)) >>> 24; }
+    queue.writeTexture({ texture: noiseTex }, d, { bytesPerRow: NOISE_N, rowsPerImage: NOISE_N }, [NOISE_N, NOISE_N, NOISE_N]);
+  }
+  const noiseView = noiseTex.createView(), noiseSmp = device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'repeat', addressModeV: 'repeat', addressModeW: 'repeat' });
+  const noiseL = [{ binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: '3d' } }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: {} }];
+  const noiseB = [{ binding: 2, resource: noiseView }, { binding: 3, resource: noiseSmp }];
+  const gl = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, ...noiseL] });
+  const ll = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {} }] });
+  const im = device.createShaderModule({ code: IMPOSTOR });
+  const impostor = device.createRenderPipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: [gl, ll] }),
+    vertex: { module: im, entryPoint: 'vs', buffers: [{ arrayStride: 40, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'uint32x4' }, { shaderLocation: 1, offset: 16, format: 'float32x4' }, { shaderLocation: 2, offset: 32, format: 'float32' }, { shaderLocation: 3, offset: 36, format: 'uint32' }] }] },
+    fragment: { module: im, entryPoint: 'fs', targets: [{ format: HDR, blend: add }] }, primitive: { topology: 'triangle-strip' },
+  });
+  const gBind = device.createBindGroup({ layout: gl, entries: [{ binding: 0, resource: { buffer: globalsBuf } }, ...noiseB] });
+  const layerData = new ArrayBuffer(80), lf = new Float32Array(layerData), li = new Int32Array(layerData);
+  const layerBuf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const lBind = device.createBindGroup({ layout: ll, entries: [{ binding: 0, resource: { buffer: layerBuf } }] });
+
+  const vl = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, { binding: 1, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, ...noiseL] });
+  const vm = device.createShaderModule({ code: VOLUME });
+  const volume = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [vl] }), vertex: { module: vm, entryPoint: 'vs' }, fragment: { module: vm, entryPoint: 'fs', targets: [{ format: HDR }] } });
+  const volData = new ArrayBuffer(4 * 80 + 16), vf = new Float32Array(volData), vu = new Uint32Array(volData);
+  const volBuf = device.createBuffer({ size: volData.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const vBind = device.createBindGroup({ layout: vl, entries: [{ binding: 0, resource: { buffer: globalsBuf } }, { binding: 1, resource: { buffer: volBuf } }, ...noiseB] });
+  const bm = device.createShaderModule({ code: BLIT });
+  const blit = device.createRenderPipeline({ layout: 'auto', vertex: { module: bm, entryPoint: 'vs' }, fragment: { module: bm, entryPoint: 'fs', targets: [{ format: HDR, blend: add }] } });
+  const fl2 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {} }] });
+  const fm = device.createShaderModule({ code: FILL });
+  const fillPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [vl, fl2] }), vertex: { module: fm, entryPoint: 'vs' }, fragment: { module: fm, entryPoint: 'fs', targets: [{ format: HDR, blend: add }] }, primitive: { topology: 'triangle-strip' } });
+  const fills = CLASSES.map((c, level) => {
+    const data = new ArrayBuffer(80), buf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    return { c, level, data, f: new Float32Array(data), i: new Int32Array(data), buf, bind: device.createBindGroup({ layout: fl2, entries: [{ binding: 0, resource: { buffer: buf } }] }) };
+  });
+  const FN = quality.fillGrid;
+  let fillOn = false;
+  const smp = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+  let volTex, volAttach, blitBind;
+  function resize(w, h) {
+    volTex?.destroy();
+    const s = quality.volScale;
+    volTex = device.createTexture({ size: [Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s))], format: HDR, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
+    const view = volTex.createView();
+    volAttach = { colorAttachments: [{ view, loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 } }] };
+    blitBind = device.createBindGroup({ layout: blit.getBindGroupLayout(0), entries: [{ binding: 0, resource: view }, { binding: 1, resource: smp }] });
+  }
+
+  // the (up to) four galaxies that loom largest: these are ray-marched
+  const volId = new Int32Array(4).fill(-1), volSize = new Float64Array(4);
+  const near = { id: -1, dist: Infinity, edge: Infinity, spacing: Infinity };       // nearest galaxy: for flight speed and the HUD
+  let nVol = 0;
+  const pos = (i, a) => u[i * 10 + a] * STEP - HALF;
+  let fillGain = 1;
+  function update(W, H, pxScale, pointGain, starGain) {
+    fillGain = starGain;
+    const px = cam.p[0], py = cam.p[1], pz = cam.p[2], k = (1 / Math.tan(cam.fov / 2)) * (H / pxScale) * 0.5;
+    let best = Infinity;
+    volId.fill(-1); volSize.fill(0); near.dist = Infinity; near.edge = Infinity; near.id = -1;
+    for (let i = 0; i < N; i++) {
+      const o = i * 10, dx = u[o] * STEP - HALF - px, dy = u[o + 1] * STEP - HALF - py, dz = u[o + 2] * STEP - HALF - pz;
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz), R = f[o + 4], size = (R / Math.max(d, 1e-9)) * k;
+      // the dominant galaxy is the one that looms largest (smallest distance in its own radii); edge is how far the
+      // nearest galaxy's body is, whichever galaxy that is
+      if (d - R * 0.6 < near.edge) near.edge = d - R * 0.6;
+      if (d / R < best) { best = d / R; near.dist = d; near.id = i; }
+      if (size < 170) continue;
+      let m = 0; for (let s = 1; s < 4; s++) if (volSize[s] < volSize[m]) m = s;
+      if (size > volSize[m]) { volSize[m] = size; volId[m] = i; }
+    }
+    nVol = 0;
+    for (let s = 0; s < 4; s++) {
+      const i = volId[s]; if (i < 0) continue;
+      const o = i * 10, b = nVol * 20, R = f[o + 4];
+      let nx = f[o + 5], ny = f[o + 6], nz = f[o + 7];
+      // any two axes perpendicular to the disc normal (must match the impostor's choice)
+      let tx = Math.abs(nx) > 0.7 ? 0 : 1, ty = Math.abs(nx) > 0.7 ? 1 : 0, tz = 0;
+      let ax = ny * tz - nz * ty, ay = nz * tx - nx * tz, az = nx * ty - ny * tx; const al = Math.hypot(ax, ay, az); ax /= al; ay /= al; az /= al;
+      const bx = ny * az - nz * ay, by = nz * ax - nx * az, bz = nx * ay - ny * ax;
+      const absmag = (u[o + 3] >>> 16) * 0.001 - 40;
+      vf[b] = pos(i, 0) - px; vf[b + 1] = pos(i, 1) - py; vf[b + 2] = pos(i, 2) - pz; vf[b + 3] = R;
+      vf[b + 4] = ax; vf[b + 5] = ay; vf[b + 6] = az; vf[b + 7] = Math.pow(10, -0.4 * absmag) * 100 / (R * R);
+      vf[b + 8] = bx; vf[b + 9] = by; vf[b + 10] = bz; vf[b + 11] = f[o + 8];
+      vf[b + 12] = nx; vf[b + 13] = ny; vf[b + 14] = nz; vf[b + 15] = Math.max(0, Math.min(1, (volSize[s] - 170) / 130));
+      vu[b + 16] = (u[o + 3] >>> 8) & 255; vu[b + 17] = u[o + 9];
+      nVol++;
+    }
+    vf[80] = quality.volSteps; vf[81] = nVol; vf[82] = 46; vf[83] = 2 * Math.tan(cam.fov / 2) / (H * quality.volScale);   // angle of one pixel of the volume target
+    queue.writeBuffer(volBuf, 0, volData);
+    // fill stars: hosted by the looming galaxy the camera is in or close to
+    let host = -1;
+    for (let s = 0, k = 0; s < 4; s++) { if (volId[s] < 0) continue; if (volId[s] === near.id && near.dist < 1.8 * f[near.id * 10 + 4]) host = k; k++; }
+    fillOn = host >= 0;
+    if (fillOn) for (const L of fills) {
+      const c = L.c.size;
+      for (let a = 0; a < 3; a++) { const g = cam.p[a] / c, q = Math.floor(g); L.i[a] = q; L.f[4 + a] = g - q; L.f[8 + a] = -cam.p[a]; }
+      L.i[3] = FN; L.f[7] = c; L.f[11] = L.c.mag;
+      L.i[12] = L.c.per; L.i[13] = L.level; L.f[14] = L.c.dens * c * c * c / L.c.per; L.f[15] = fillGain;
+      L.i[16] = host; L.i[17] = near.id === 0 ? 1 : 0;
+      queue.writeBuffer(L.buf, 0, L.data);
+    }
+    // typical distance between neighbouring fill stars here (for the flight model); Infinity outside galaxies
+    near.spacing = Infinity;
+    if (fillOn) {
+      const o = near.id * 10, R = f[o + 4], dx = px - pos(near.id, 0), dy = py - pos(near.id, 1), dz = pz - pos(near.id, 2);
+      const z = dx * f[o + 5] + dy * f[o + 6] + dz * f[o + 7], r = Math.sqrt(Math.max(0, dx * dx + dy * dy + dz * dz - z * z)) / R;
+      const base = (u[o + 3] >>> 8) & 15, fb = [1, 0.55, 0.42, 0.34, 0.26, 0.18, 0.12, 0.08, 0.04, 0][Math.min(base, 9)], hz = base === 9 ? 0.1 : base === 1 ? 0.035 : 0.022;
+      const disc = (1 - fb) / (12.566 * 0.0729 * hz) * Math.exp(-r / 0.27 - Math.abs(z / R) / hz);
+      const rb = base === 0 ? 0.12 : 0.045 + 0.12 * fb, s2 = r * r + (z / R) * (z / R) / 0.36, bul = fb / (9.8696 * 0.6 * rb * rb * rb) / ((1 + s2 / (rb * rb)) ** 2);
+      const rho = (disc + bul) * (Math.pow(10, -0.4 * ((u[o + 3] >>> 16) * 0.001 - 40)) * 100 / (R * R * R)) / 0.02296;
+      if (rho > 1e-6) near.spacing = Math.pow(0.012 * rho, -1 / 3);
+    }
+    let inside = true;
+    for (let a = 0; a < 3; a++) if (Math.abs(cam.p[a]) >= HALF) inside = false;
+    for (let a = 0; a < 3; a++) {
+      if (inside) { const g = (cam.p[a] + HALF) / STEP, q = Math.floor(g); li[a] = q; lf[4 + a] = g - q; lf[8 + a] = 0; }
+      else { li[a] = 0; lf[4 + a] = 0; lf[8 + a] = -HALF - cam.p[a]; }
+    }
+    lf[7] = STEP; lf[11] = 40; lf[12] = 1.0; lf[13] = pointGain;
+    li[16] = volId[0]; li[17] = volId[1]; li[18] = volId[2]; li[19] = volId[3];
+    queue.writeBuffer(layerBuf, 0, layerData);
+  }
+  // the reduced-resolution volume pass (its own render pass), then blit + impostors inside the scene pass
+  // deep: the nebula layer, whose large members share this target
+  function drawVolumes(enc, timestampWrites, deep, web) {
+    const extra = deep && deep.hasBig(), glow = web && web.on();
+    if (!nVol && !extra && !glow) return false;
+    volAttach.timestampWrites = timestampWrites;
+    const p = enc.beginRenderPass(volAttach);
+    if (nVol) { p.setPipeline(volume); p.setBindGroup(0, vBind); p.draw(3); }
+    if (extra) deep.drawBig(p);
+    if (glow) web.draw(p);
+    p.end();
+    return true;
+  }
+  function draw(pass, hadVol, skip) {
+    if (hadVol) { pass.setPipeline(blit); pass.setBindGroup(0, blitBind); pass.draw(3); }
+    if (fillOn && !skip.fill) { pass.setPipeline(fillPipe); pass.setBindGroup(0, vBind); for (const L of fills) { pass.setBindGroup(1, L.bind); pass.draw(4, FN * FN * FN * L.c.per); } }
+    if (skip.imp) return;
+    pass.setPipeline(impostor); pass.setBindGroup(0, gBind); pass.setBindGroup(1, lBind); pass.setVertexBuffer(0, inst); pass.draw(4, N);
+  }
+  return { noise: { view: noiseView, sampler: noiseSmp }, update, drawVolumes, draw, resize, near, normal: (i, a) => f[i * 10 + 5 + a], names: meta.names, count: N, pos, radius: (i) => f[i * 10 + 4], absmag: (i) => (u[i * 10 + 3] >>> 16) * 0.001 - 40 };
+}
