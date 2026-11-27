@@ -52,8 +52,16 @@ CONTROLS
 - L constellation lines, N names, P procedural fill, M sound, H performance stats, Esc menu
 - Touch: hold one finger to fly forward and slide it to steer; two-finger pinch or vertical drag changes speed through the exponential range; tap an object to target it, double-tap to fly there. A menu button gives the layer toggles, search, viewpoints and detail level. Phones always present in landscape; UI sized for thumbs and safe-area insets.
 
+EARTH AND SAVE POINTS
+- The flight starts in low Earth orbit: you launch from Earth and can always turn around and watch it shrink behind you. Earth is the one place an image is allowed: NASA Blue Marble (public domain) at modest resolution, lit by the Sun, with a thin atmosphere rim. No surface detail beyond that; this is not a globe viewer.
+- Save points: save where you are and which way you face, name it, and return to it later. Stored in the browser only (localStorage), listed in the menu.
+- The picture comes first. By default the screen is the view and nothing else; labels and figures are one easy toggle away, and the few statistics live in a small panel at the top right, as in Abyssal Garden.
+
+BACKLOG (not part of done)
+- Share: capture the current view as an image and share it, with a link that carries the position and heading so anyone opening it lands at the same spot in the universe.
+
 HUD
-Minimal and hideable: speed, distance from Sol, nearest named object, current scale (Solar System / stellar neighbourhood / Milky Way / Local Group / cosmic web).
+Minimal, hideable and out of the way: speed in c, distance from Earth (AU, then light-years), nearest named object, current scale (Solar System / stellar neighbourhood / Milky Way / Local Group / cosmic web).
 
 SOUND
 Synthesised ambient soundscape with the Web Audio API, responsive to speed and scale. Off until the user starts.

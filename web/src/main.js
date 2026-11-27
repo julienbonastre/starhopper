@@ -38,7 +38,7 @@ async function main() {
     initGalaxies(gpu, globalsBuf, base, quality)]);
   const post = initPost(gpu, quality);
 
-  const state = { frozen: false, shot: null, snap: 1 };
+  const state = { frozen: false, shot: null, snap: 1, frames: 0 };
   // ---- view state
   let resScale = quality.startScale, W = 0, H = 0, pxScale = 1;
   const resize = () => {
@@ -103,12 +103,31 @@ async function main() {
     else if (code === 'Equal') flight.throttle = Math.min(4, flight.throttle + 0.25);
     else if (code === 'Minus') flight.throttle = Math.max(-3, flight.throttle - 0.25);
     else if (code === 'Tab') body.classList.toggle('nohud');
-    else if (code === 'KeyL') show.lines = !show.lines;
-    else if (code === 'KeyN') show.names = !show.names;
-    else if (code === 'KeyP') show.proc = !show.proc;
-    else if (/^Digit[1-8]$/.test(code)) { setPose(+code[5] - 1); state.snap = 1; }
+    else if (code === 'KeyL') { show.lines = !show.lines; syncToggles(); }
+    else if (code === 'KeyN') { show.names = !show.names; syncToggles(); }
+    else if (code === 'KeyP') { show.proc = !show.proc; syncToggles(); flash(show.proc ? 'Procedural fill on' : 'Measured data only'); }
+    else if (/^Digit[1-8]$/.test(code)) { setPose(+code[5] - 1); state.snap = 1; flash(POSES[+code[5] - 1].name); }
     else if (code === 'Unlocked' && !params.has('auto')) body.classList.remove('fly');
+    else if (code === 'KeyB' && params.has('bench')) { flash('Benchmark running'); runBench().then((r) => { showPerf = true; $('perf').hidden = false; console.log(JSON.stringify(r)); flash('Benchmark done'); $('s').textContent = JSON.stringify(r); body.classList.remove('fly'); }); }
   });
+  const flash = (t) => { const m = $('msg'); m.textContent = t; m.classList.add('on'); clearTimeout(flash.t); flash.t = setTimeout(() => m.classList.remove('on'), 2200); };
+  document.querySelectorAll('#tg button').forEach((b) => { b.onclick = () => { show[b.dataset.k] = !show[b.dataset.k]; b.classList.toggle('on', show[b.dataset.k]); }; });
+  const syncToggles = () => document.querySelectorAll('#tg button').forEach((b) => b.classList.toggle('on', show[b.dataset.k]));
+  // search: every named star and galaxy; Enter flies to the best match, stopping a comfortable distance short
+  const index = [];
+  for (const s of names.stars) { if (s[0]) index.push([s[0].toLowerCase(), s[0], s[2], s[3], s[4], 0.0004]); if (s[1]) index.push([s[1].toLowerCase(), s[0] || s[1], s[2], s[3], s[4], 0.0004]); }
+  gal.names.forEach((n, i) => index.push([n[0].toLowerCase(), n[0], gal.pos(i, 0), gal.pos(i, 1), gal.pos(i, 2), gal.radius(i) * 3.2]));
+  $('find').addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key !== 'Enter') return;
+    const q = e.target.value.trim().toLowerCase().replace(/^m(\d)/, 'm $1').replace(/^ngc(\d)/, 'ngc $1'); if (!q) return;
+    const hit = index.find((r) => r[0] === q) || index.find((r) => r[0].startsWith(q)) || index.find((r) => r[0].includes(q));
+    if (!hit) { $('s').textContent = 'Nothing in the catalogues matches that name'; return; }
+    e.target.blur(); launch(); flyTo(hit[2], hit[3], hit[4], hit[5], 9); state.snapSoon = 0; flash(hit[1]);
+  });
+  fetch(base + 'manifest.json').then((r) => r.json()).then((m) => {
+    $('crb').innerHTML = m.sources.map((x) => `<p><a href="${x.home}" target="_blank" rel="noopener">${x.title}</a><br>${x.credit}. ${x.licence}.</p>`).join('') + '<p>Procedural fill (galaxy shapes, the Milky Way beyond the catalogue, fill stars) is a model, not data. Press P to hide it.</p>';
+  }).catch(() => {});
   const launch = () => { body.classList.add('fly'); canvas.requestPointerLock?.()?.catch?.(() => {}); };
   $('go').onclick = launch;
   canvas.onclick = () => { if (body.classList.contains('fly') && !flight.locked) canvas.requestPointerLock?.()?.catch?.(() => {}); };
@@ -130,6 +149,11 @@ async function main() {
     return cs + (ly >= 0.01 ? '  ·  ' + (ly < 1000 ? ly.toFixed(ly < 10 ? 2 : 0) + ' ly/s' : ly < 1e6 ? (ly / 1e3).toFixed(1) + ' kly/s' : (ly / 1e6).toFixed(1) + ' Mly/s') : '');
   };
 
+  // ---- GPU timing (timestamp queries, read back a frame or two late) and resolution scaling to hold the frame rate
+  const ts = gpu.hasTS ? { set: device.createQuerySet({ type: 'timestamp', count: 2 }), resolve: device.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }), read: device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), busy: false } : null;
+  const tsBegin = ts && { querySet: ts.set, beginningOfPassWriteIndex: 0 }, tsEnd = ts && { querySet: ts.set, endOfPassWriteIndex: 1 };
+  const gpuDone = () => { const a = new BigInt64Array(ts.read.getMappedRange()); const ms = Number(a[1] - a[0]) / 1e6; ts.read.unmap(); ts.busy = false; if (ms > 0 && ms < 500) { gpuMs += (ms - gpuMs) * 0.1; if (bench) bench.gpu.push(ms); } };
+  let gpuMs = 0, frameMs = 8, bench = null, scaleT = 0, minDt = 0.05;
   let last = performance.now(), time = 0, frames = 0, fpsT = 0, fps = 0, cpuMs = 0;
   let busy = false, conFade = 1, nameFade = 1, labelT = 1, pointGain = 1, procFade = 1;
   const DIFFUSE = 11;   // extended light is lifted relative to point sources, as dark-adapted eyes do
@@ -137,6 +161,7 @@ async function main() {
     requestAnimationFrame(frame);
     const dt = Math.min(0.1, (now - last) / 1000); last = now;
     if (document.hidden || busy) return;
+    state.frames++;
     const t0 = performance.now();
     time += dt;
     // context distance: the nearest star (never closer than about ten solar radii) or the galaxy being crossed
@@ -208,19 +233,31 @@ async function main() {
 
     const enc = device.createCommandEncoder();
     const hadVol = gal.drawVolumes(enc);
-    const pass = enc.beginRenderPass(post.sceneAttach());
+    const sceneDesc = post.sceneAttach(); sceneDesc.timestampWrites = ts && !ts.busy ? tsBegin : undefined;
+    const pass = enc.beginRenderPass(sceneDesc);
     gal.draw(pass, hadVol);
     galPts.draw(pass, pointGain);
     lines.draw(pass);
     stars.draw(pass, starGain);
     labels.draw(pass);
     pass.end();
-    post.run(enc, gpu.offscreen ? offView : gpu.ctx.getCurrentTexture().createView(), time, 0.09);
+    post.run(enc, gpu.offscreen ? offView : gpu.ctx.getCurrentTexture().createView(), time, 0.09, ts && !ts.busy ? tsEnd : undefined);
+    if (ts && !ts.busy) { enc.resolveQuerySet(ts.set, 0, 2, ts.resolve, 0); enc.copyBufferToBuffer(ts.resolve, 0, ts.read, 0, 16); }
     queue.submit([enc.finish()]);
+    if (ts && !ts.busy) { ts.busy = true; ts.read.mapAsync(GPUMapMode.READ).then(gpuDone, () => { ts.busy = false; }); }
     if (gpu.offscreen) { busy = true; queue.onSubmittedWorkDone().then(() => { busy = false; }); } // software rigs: never queue frames
     if (state.shot) { const r = state.shot; state.shot = null; r(); }
 
     cpuMs += (performance.now() - t0 - cpuMs) * 0.05;
+    // hold the display's frame rate: drop the resolution a step when frames run long, raise it when the GPU has room
+    if (dt > 0) { frameMs += (dt * 1000 - frameMs) * 0.05; if (dt < minDt && dt > 0.003) minDt = dt; if (bench) bench.frame.push(dt * 1000); }
+    scaleT += dt;
+    if (scaleT > 1.5 && !gpu.offscreen && !params.has('fixed')) {
+      scaleT = 0;
+      const budget = minDt * 1000;
+      if (frameMs > budget * 1.18 && resScale > 0.45) { resScale = Math.max(0.45, resScale - 0.07); resize(); }
+      else if (ts && gpuMs > 0 && gpuMs < budget * 0.55 && frameMs < budget * 1.08 && resScale < quality.startScale) { resScale = Math.min(quality.startScale, resScale + 0.05); resize(); }
+    }
     frames++; fpsT += dt;
     if (fpsT >= 0.5) { fps = frames / fpsT; frames = 0; fpsT = 0; }
     hudT += dt;
@@ -228,8 +265,10 @@ async function main() {
       hudT = 0;
       $('hs').textContent = fmtSpeed(flight.speed);
       $('hd').textContent = fmtDist(Math.hypot(cam.p[0], cam.p[1], cam.p[2]));
+      const fromMW = gal.near.id === 0 ? 0 : Math.hypot(cam.p[0] - gal.pos(0, 0), cam.p[1] - gal.pos(0, 1), cam.p[2] - gal.pos(0, 2));
+      $('scale').textContent = fromSol < 0.01 ? 'Solar System' : fromSol < 1500 ? 'Stellar neighbourhood' : fromMW < 60000 ? 'Milky Way' : fromMW < 1.6e6 ? 'Local Group' : 'Cosmic web';
       $('hn').textContent = n.dist < 30 ? fmtDist(n.dist) : gn.id >= 0 ? gal.names[gn.id][0] + '  ' + fmtDist(gn.dist) : '';
-      if (showPerf) { const s = stars.stats(), g2 = galPts.stats(); $('perf').textContent = `${fps.toFixed(0)} fps  cpu ${cpuMs.toFixed(2)} ms\n${W}x${H}\n${s.drawn.toLocaleString()} stars in ${s.tiles} tiles\n${s.loaded.toLocaleString()} loaded, ${s.pending} pending\nexposure ${exposure.toPrecision(3)}  mag ${magLimit.toFixed(1)} / ${galLimit.toFixed(1)}\n${g2.drawn.toLocaleString()} galaxies`; }
+      if (showPerf) { const s = stars.stats(), g2 = galPts.stats(); $('perf').textContent = `${fps.toFixed(0)} fps  gpu ${gpuMs.toFixed(2)} ms  cpu ${cpuMs.toFixed(2)} ms\n${W}x${H}  scale ${resScale.toFixed(2)}\n${s.drawn.toLocaleString()} stars in ${s.tiles} tiles\n${s.loaded.toLocaleString()} loaded, ${s.pending} pending\nexposure ${exposure.toPrecision(3)}  mag ${magLimit.toFixed(1)} / ${galLimit.toFixed(1)}\n${g2.drawn.toLocaleString()} galaxies`; }
     }
   }
   say('Loading the nearest stars', 0.7);
@@ -241,6 +280,15 @@ async function main() {
   try { localStorage.removeItem('starhopperLoad'); } catch {}
   if (params.has('auto')) body.classList.add('fly');
   // hooks for the tests, the benchmark and screenshots
-  window.SH = { settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
+  // scripted fly-through of all eight viewpoints (about 90 s); resolves with frame and GPU time statistics
+  const runBench = async (secs = 11) => {
+    const stat = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? { avg: +(s.reduce((x, y) => x + y, 0) / s.length).toFixed(2), p99: +s[Math.floor(s.length * 0.99)].toFixed(2), max: +s[s.length - 1].toFixed(2), n: s.length } : null; };
+    setPose(0); state.snap = 1; await new Promise((r) => setTimeout(r, 1500));
+    bench = { frame: [], gpu: [] };
+    for (let i = 1; i <= POSES.length; i++) { const p = POSES[i % POSES.length]; flyTo(p.p[0], p.p[1], p.p[2], 0, secs); await new Promise((r) => setTimeout(r, secs * 1000 + 300)); }
+    const b = bench; bench = null;
+    return { frameMs: stat(b.frame), gpuMs: stat(b.gpu), size: [W, H], scale: resScale, level: LEVEL, mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null };
+  };
+  window.SH = { bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
 }
 main().catch((e) => { console.error(e); body.className = 'l e'; $('s').textContent = (e.cause ? '' : 'Failed to start: ') + e.message; });

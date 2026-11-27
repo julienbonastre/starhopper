@@ -11,7 +11,7 @@ export const flight = {
   locked: false,
 };
 const keys = new Set();
-let lookX = 0, lookY = 0;
+let lookX = 0, lookY = 0, touch = new Map();
 const go = { on: false, t: 0, dur: 7, from: new Float64Array(3), to: new Float64Array(3), stop: 0, q0: new Float64Array(4), q1: new Float64Array(4), d0: 1 };
 const _q = new Float64Array(4);
 
@@ -26,6 +26,21 @@ export function initInput(canvas, onAction) {
   addEventListener('blur', () => keys.clear());
   document.addEventListener('pointerlockchange', () => { flight.locked = document.pointerLockElement === canvas; onAction(flight.locked ? 'Locked' : 'Unlocked'); });
   addEventListener('mousemove', (e) => { if (flight.locked) { lookX += e.movementX; lookY += e.movementY; } });
+  // touch: one finger flies forward and steers by how far it has slid from where it went down; a second finger
+  // pinches the throttle. A quick tap is passed on as an action.
+  const tp = new Map(); let pinch = 0, downT = 0;
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    canvas.setPointerCapture(e.pointerId); tp.set(e.pointerId, { x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY }); downT = performance.now(); pinch = 0;
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    const t = tp.get(e.pointerId); if (!t) return;
+    t.x = e.clientX; t.y = e.clientY;
+    if (tp.size === 2) { const [a, b] = [...tp.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch) flight.throttle = Math.max(-3, Math.min(4, flight.throttle + Math.log10(d / pinch) * 2.5)); pinch = d; }
+  });
+  const up = (e) => { const t = tp.get(e.pointerId); if (!t) return; tp.delete(e.pointerId); pinch = 0; if (performance.now() - downT < 220 && Math.hypot(t.x - t.x0, t.y - t.y0) < 12) onAction('Tap'); };
+  canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
+  touch = tp;
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); flight.throttle = Math.max(-3, Math.min(4, flight.throttle - Math.sign(e.deltaY) * 0.1)); }, { passive: false });
 }
 
@@ -49,7 +64,12 @@ export function updateFlight(dt) {
   const roll = (keys.has('KeyQ') ? 1 : 0) - (keys.has('KeyE') ? 1 : 0);
   if (roll) rotateLocal(2, roll * dt * 1.2);
   basis();
-  const mx = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0), my = (keys.has('KeyR') ? 1 : 0) - (keys.has('KeyF') ? 1 : 0), mz = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0);
+  let tz = 0;
+  if (touch.size === 1) {
+    const t = touch.values().next().value, k = 2.2 / Math.min(innerWidth, innerHeight);
+    rotateLocal(1, -(t.x - t.x0) * k * dt * 1.6); rotateLocal(0, -(t.y - t.y0) * k * dt * 1.6); basis(); tz = 1;
+  }
+  const mx = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0), my = (keys.has('KeyR') ? 1 : 0) - (keys.has('KeyF') ? 1 : 0), mz = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) + tz;
   if (go.on && (mx || my || mz)) cancelGoto();
   if (go.on) {
     // travel along the line with the remaining distance shrinking geometrically, so every scale gets equal time

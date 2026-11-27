@@ -15,6 +15,8 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 #hud b { display: inline-block; min-width: 5.2em; font-weight: 500; color: var(--dim); text-transform: uppercase; font-size: 10px; letter-spacing: .12em; }
 #hud div { white-space: nowrap; }
 #scale { position: fixed; right: max(14px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); text-align: right; text-transform: uppercase; letter-spacing: .18em; font-size: 10px; color: var(--dim); text-shadow: 0 0 6px #000; pointer-events: none; transition: opacity .4s; }
+#msg { position: fixed; left: 0; right: 0; top: 18%; text-align: center; letter-spacing: .3em; text-transform: uppercase; font-size: 12px; color: var(--fg); text-shadow: 0 0 8px #000; opacity: 0; transition: opacity .6s; pointer-events: none; }
+#msg.on { opacity: .9; }
 #perf { position: fixed; right: 12px; top: 10px; white-space: pre; text-align: right; font: 11px/1.4 ui-monospace, Menlo, monospace; color: #9fb; text-shadow: 0 0 4px #000; pointer-events: none; }
 body.nohud #hud, body.nohud #scale { opacity: 0; }
 #veil { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, #0006 0%, #000c 100%); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); transition: opacity .5s; z-index: 5; }
@@ -31,9 +33,13 @@ h1 { margin: 0; font-weight: 200; font-size: clamp(34px, 7vw, 54px); letter-spac
 body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 #keys { margin: 18px auto 0; display: grid; grid-template-columns: auto auto; gap: 3px 14px; justify-content: center; text-align: left; color: var(--dim); font-size: 12px; }
 #keys kbd { font: inherit; color: var(--fg); }
-#lv { margin-top: 16px; display: flex; gap: 6px; justify-content: center; }
-#lv button, #menu { appearance: none; font: inherit; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 5px 14px; cursor: pointer; }
-#lv button.on { color: #000; background: var(--fg); border-color: var(--fg); }
+#find { width: 100%; margin-top: 18px; font: inherit; color: var(--fg); background: #ffffff10; border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; outline: none; -webkit-user-select: text; user-select: text; }
+#find:focus { border-color: var(--acc); }
+#tg { margin-top: 12px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+#cr { margin-top: 14px; font-size: 11px; color: var(--dim); text-align: left; } #cr summary { cursor: pointer; text-align: center; } #crb p { margin: 8px 0 0; } #crb a { color: inherit; }
+#lv { margin-top: 12px; display: flex; gap: 6px; justify-content: center; }
+#lv button, #tg button, #menu { appearance: none; font: inherit; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 5px 14px; cursor: pointer; }
+#lv button.on, #tg button.on { color: #000; background: var(--fg); border-color: var(--fg); }
 #foot { margin-top: 16px; font-size: 11px; color: var(--dim); } #foot a { color: inherit; }
 #menu { position: fixed; top: max(10px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); padding: 8px 12px; display: none; z-index: 4; backdrop-filter: blur(4px); }
 @media (pointer: coarse) { body.fly #menu { display: block; } #keys { display: none; } }
@@ -43,6 +49,7 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 <canvas id="c"></canvas>
 <div id="hud"><div><b>Speed</b><span id="hs"></span></div><div><b>From Sol</b><span id="hd"></span></div><div><b>Nearest</b><span id="hn"></span></div></div>
 <div id="scale"></div>
+<div id="msg"></div>
 <div id="perf" hidden></div>
 <button id="menu" aria-label="Menu">&#8801;</button>
 <div id="veil"><div id="card">
@@ -53,9 +60,12 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 <div id="s">Starting up</div>
 <div id="keys">
 <kbd>W A S D</kbd><span>fly</span><kbd>Mouse</kbd><span>look</span><kbd>R / F</kbd><span>up / down</span><kbd>Q / E</kbd><span>roll</span>
-<kbd>Wheel</kbd><span>throttle</span><kbd>Shift / Ctrl</kbd><span>&times;10 / &divide;10</span><kbd>Home</kbd><span>back to Sol</span><kbd>H</kbd><span>stats</span>
+<kbd>Wheel</kbd><span>throttle</span><kbd>Shift / Ctrl</kbd><span>&times;10 / &divide;10</span><kbd>1 &ndash; 8</kbd><span>viewpoints</span><kbd>Home</kbd><span>back to Sol</span><kbd>L N P</kbd><span>lines, names, fill</span><kbd>[ ]</kbd><span>exposure</span><kbd>Tab / H</kbd><span>hide HUD / stats</span><kbd>Esc</kbd><span>this menu</span>
 </div>
+<input id="find" type="search" placeholder="Fly to a star or galaxy: Vega, Andromeda, M 87 ..." autocomplete="off" spellcheck="false">
+<div id="tg"><button data-k="lines" class="on">Constellations</button><button data-k="names" class="on">Names</button><button data-k="proc" class="on">Procedural fill</button></div>
 <div id="lv"><button data-l="0">High</button><button data-l="1">Medium</button><button data-l="2">Low</button></div>
+<details id="cr"><summary>Data and credits</summary><div id="crb"></div></details>
 <div id="foot">Real catalogue data. <a href="https://github.com/julienbonastre/starhopper" target="_blank" rel="noopener">Source and credits</a></div>
 </div></div>
 <script>/*SCRIPT*/</script>

@@ -36,7 +36,9 @@ try {
     await page.evaluate((i) => { SH.setPose(i - 1); SH.settle(); }, n);
     // wait until every tile this view needs has arrived, then a little longer for the exposure to settle
     for (let k = 0; k < 120; k++) { await page.waitForTimeout(250); if (k > 3 && !(await page.evaluate(() => SH.stars.stats().pending + SH.galPts.stats().pending))) break; }
-    await page.evaluate(() => SH.settle()); await page.waitForTimeout(500);
+    // a few more frames, so the exposure has settled on the new surroundings
+    const f0 = await page.evaluate(() => { SH.settle(); return SH.frames(); });
+    await page.waitForFunction((f) => SH.frames() >= f + 8, f0, { timeout: 120000 });
     const url = await page.evaluate(() => SH.capture());
     const file = `pose_${n}.png`;
     writeFileSync(path.join(out, file), Buffer.from(url.split(',')[1], 'base64'));

@@ -364,12 +364,15 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
   function update(W, H, pxScale, pointGain, starGain) {
     fillGain = starGain;
     const px = cam.p[0], py = cam.p[1], pz = cam.p[2], k = (1 / Math.tan(cam.fov / 2)) * (H / pxScale) * 0.5;
+    let best = Infinity;
     volId.fill(-1); volSize.fill(0); near.dist = Infinity; near.edge = Infinity; near.id = -1;
     for (let i = 0; i < N; i++) {
       const o = i * 10, dx = u[o] * STEP - HALF - px, dy = u[o + 1] * STEP - HALF - py, dz = u[o + 2] * STEP - HALF - pz;
       const d = Math.sqrt(dx * dx + dy * dy + dz * dz), R = f[o + 4], size = (R / Math.max(d, 1e-9)) * k;
-      const edge = d - R * 0.6;
-      if (edge < near.edge) { near.edge = edge; near.dist = d; near.id = i; }
+      // the dominant galaxy is the one that looms largest (smallest distance in its own radii); edge is how far the
+      // nearest galaxy's body is, whichever galaxy that is
+      if (d - R * 0.6 < near.edge) near.edge = d - R * 0.6;
+      if (d / R < best) { best = d / R; near.dist = d; near.id = i; }
       if (size < 170) continue;
       let m = 0; for (let s = 1; s < 4; s++) if (volSize[s] < volSize[m]) m = s;
       if (size > volSize[m]) { volSize[m] = size; volId[m] = i; }
