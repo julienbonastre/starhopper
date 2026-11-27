@@ -39,6 +39,8 @@ Measured, from catalogues pinned by checksum:
 - **Earth**: NASA Blue Marble Next Generation.
 - **The Moon and the other planets**: Solar System Scope's maps (CC BY 4.0), assembled from NASA mission imagery: MESSENGER for Mercury, Viking for Mars, Cassini for Jupiter and Saturn, Voyager 2 for Uranus and Neptune, the Lunar Reconnaissance Orbiter for the Moon. Venus shows its cloud tops, which is an artist's map. Each body is turned to face the way the IAU's rotation model says it does today, so the Moon shows the Earth its near side; the giants' weather is from the day of the flyby. A map is fetched as you approach its body.
 
+Flying fast draws the nearby stars and galaxies out into streaks along their path across the view, as an open shutter would; `V` turns that off.
+
 Procedural, and hidden by `P`:
 
 - The shapes of galaxies (spiral, elliptical or irregular from the catalogued type, size and tilt) and of nebulae.
@@ -73,16 +75,16 @@ Every open pull request from a branch of this repository also gets a preview at 
 
 ## Measured
 
-On a MacBook Pro (M5 Pro, 20 GPU cores), Chrome 158, macOS 26.7, High detail, 3024 x 1964 at 120 Hz, resolution scale 1.0, over the scripted fly-through (`node tools/bench.mjs`, 2026-11-27):
+On a MacBook Pro (M5 Pro, 20 GPU cores), Chrome 158, macOS 26.7, High detail, 3024 x 1964 at 120 Hz, resolution scale 1.0, over the scripted fly-through (`node tools/bench.mjs`, 2026-11-28):
 
 | | average | 99th percentile | maximum |
 |---|---|---|---|
-| Frame interval | 8.33 ms | 10.3 ms | 10.4 ms |
-| GPU time per frame | 4.47 ms | 6.33 ms | 9.23 ms |
+| Frame interval | 8.33 ms | 10.3 ms | 10.5 ms |
+| GPU time per frame | 4.11 ms | 6.18 ms | 10.11 ms |
 
-- No frame was presented late (0 of 10,850).
-- One GPU sample of 10,006 exceeded 8.3 ms (it comes and goes between runs, at the instant the last leg starts, and never delays a frame).
-- JS heap at the end of the run: 38 MB.
+- No frame was presented late (0 of 10,848).
+- One GPU sample of 10,257 exceeded 8.3 ms (it comes and goes between runs, at the instant the last leg starts, and never delays a frame).
+- JS heap at the end of the run: 39 MB.
 
 Sizes:
 

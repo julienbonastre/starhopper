@@ -12,7 +12,7 @@ struct Layer {
   sigma0: f32, gain: f32,        // tightest sprite in CSS pixels; brightness multiplier (fades the layer)
 }
 @group(1) @binding(0) var<uniform> L: Layer;
-struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f, @location(1) col: vec3f, @location(2) prm: vec4f }
+struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f, @location(1) col: vec3f, @location(2) prm: vec4f, @location(3) seg: f32 }
 
 // B-V colour index -> linear RGB of a black body at that temperature, luminance 1
 fn starColour(bv: f32) -> vec3f {
@@ -55,8 +55,18 @@ const CORE = 3.2;     // ... up to this sigma in CSS pixels
   let p = project(rel);
   if (peak < 0.0035 || p.z > 1.0) { o.pos = vec4f(0.0, 0.0, 2.0, 1.0); return o; }
   let half = reach + 1.0;
-  o.pos = vec4f(p.xy + corner * half * 2.0 / G.viewport, 0.5, 1.0);
-  o.uv = corner * half;
+  // Speed: where this point was when the shutter opened. Flying fast, the near ones are drawn out into streaks
+  // along their path across the view (the far ones barely move, as from a train window).
+  var ax = vec2f(1.0, 0.0); var seg = 0.0; var mid = p.xy;
+  let p1 = project(rel + G.motion);
+  if (p1.z <= 1.0) {
+    let st = (p1.xy - p.xy) * G.viewport * 0.5; let sl = length(st);
+    if (sl > 0.75) { ax = st / sl; seg = min(sl, 110.0 * G.pxScale) * 0.5; mid = p.xy + ax * seg * 2.0 / G.viewport; }
+  }
+  let off = ax * corner.x * (half + seg) + vec2f(-ax.y, ax.x) * corner.y * half;
+  o.pos = vec4f(mid + off * 2.0 / G.viewport, 0.5, 1.0);
+  o.uv = vec2f(corner.x * (half + seg), corner.y * half);
+  o.seg = seg;
   o.col = starColour(f32((s.w >> 8u) & 255u) / 80.0 - 0.5);
   if (L.sigma0 > 0.9) {
     // the galaxy layer: no two galaxies are alike, so each point gets its own size and tint (from its position)
@@ -64,11 +74,13 @@ const CORE = 3.2;     // ... up to this sigma in CSS pixels
     let k = fract((hsh.x + hsh.y) * hsh.z);
     o.col = mix(vec3f(1.0, 0.80, 0.58), vec3f(0.66, 0.80, 1.0), k * k);
   }
-  o.prm = vec4f(peak, sigma, reach / sigma, min(0.045 * over, 0.7) * glare);
+  // the same light spread along the streak: dimmer, though less than in proportion, so that the streaks read
+  o.prm = vec4f(peak / pow(1.0 + seg / (1.25 * sigma), 0.55), sigma, reach / sigma, min(0.045 * over, 0.7) * glare);
   return o;
 }
 @fragment fn fs(i: VO) -> @location(0) vec4f {
-  let r2 = dot(i.uv, i.uv) / (i.prm.y * i.prm.y);
+  let along = max(abs(i.uv.x) - i.seg, 0.0);                  // distance to the streak's segment (a point when still)
+  let r2 = (along * along + i.uv.y * i.uv.y) / (i.prm.y * i.prm.y);
   let core = exp(-0.5 * r2);
   // glare: falls off as a power law and reaches zero at the edge of the sprite
   let q = clamp(1.0 - r2 / (i.prm.z * i.prm.z), 0.0, 1.0);
