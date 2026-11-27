@@ -5,6 +5,19 @@
 import { GLOBALS, HDR } from './gpu.js';
 import { cam } from './camera.js';
 
+// Value noise, read from a small repeating 3D texture of random values (one filtered fetch instead of eight hashes).
+// The fill-star shader never asks for detail, so it gets a stub and needs no texture.
+const NOISE_N = 64;
+const NOISE_TEX = /*wgsl*/`
+@group(0) @binding(2) var noiseTex: texture_3d<f32>;
+@group(0) @binding(3) var noiseSmp: sampler;
+fn vnoise(p: vec3f) -> f32 {
+  let i = floor(p); var f = p - i; f = f * f * (3.0 - 2.0 * f);
+  return textureSampleLevel(noiseTex, noiseSmp, (i + f + 0.5) / ${NOISE_N}.0, 0.0).r;
+}
+`;
+const NOISE_STUB = /*wgsl*/`fn vnoise(p: vec3f) -> f32 { return 0.5; }
+`;
 const MODEL = /*wgsl*/`
 struct GalP { fb: f32, rb: f32, h: f32, hz: f32, pitch: f32, arms: f32, armC: f32, clump: f32, bar: f32, qz: f32, wind: f32, phase: f32 }
 // Hubble sequence: 0 E, 1 S0, 2 Sa, 3 Sab, 4 Sb, 5 Sbc, 6 Sc, 7 Scd, 8 Sd/Sm, 9 Irr
@@ -25,12 +38,6 @@ fn galParams(t: u32, flat: f32, seed: u32) -> GalP {
   p.wind = select(-1.0, 1.0, (seed & 2u) != 0u);
   p.phase = f32((seed >> 8u) & 255u) * 0.0246;
   return p;
-}
-fn h3(p: vec3f) -> f32 { var q = fract(p * vec3f(0.1031, 0.1030, 0.0973)); q += dot(q, q.yxz + 33.33); return fract((q.x + q.y) * q.z); }
-fn vnoise(p: vec3f) -> f32 {
-  let i = floor(p); var f = fract(p); f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(mix(h3(i), h3(i + vec3f(1, 0, 0)), f.x), mix(h3(i + vec3f(0, 1, 0)), h3(i + vec3f(1, 1, 0)), f.x), f.y),
-             mix(mix(h3(i + vec3f(0, 0, 1)), h3(i + vec3f(1, 0, 1)), f.x), mix(h3(i + vec3f(0, 1, 1)), h3(i + vec3f(1, 1, 1)), f.x), f.y), f.z);
 }
 // Surface brightness is shown as the flux falling on one pixel of a reference view (1000 px tall, 60 degrees), so the
 // balance between stars and extended light does not depend on the window size.
@@ -83,6 +90,7 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32) -> vec4f {
 // real catalogue is complete (it would be brighter than magnitude 10.5 from the Sun).
 const FILL = /*wgsl*/`
 ${GLOBALS}
+${NOISE_STUB}
 ${MODEL}
 struct Vol { c: vec3f, R: f32, ax: vec3f, lum: f32, ay: vec3f, flat: f32, n: vec3f, weight: f32, id: vec4u }
 struct Vols { v: array<Vol, 4>, steps: f32, count: f32, kappa: f32, pad: f32 }
@@ -158,6 +166,7 @@ struct Layer { camQ: vec3i, pad0: i32, camF: vec3f, step: f32, far: vec3f, magOf
 const IMPOSTOR = /*wgsl*/`
 ${GLOBALS}
 ${LAYER}
+${NOISE_TEX}
 ${MODEL}
 struct VO {
   @builtin(position) pos: vec4f, @location(0) uv: vec2f,
@@ -246,6 +255,7 @@ struct VO {
 
 const VOLUME = /*wgsl*/`
 ${GLOBALS}
+${NOISE_TEX}
 ${MODEL}
 struct Vol { c: vec3f, R: f32, ax: vec3f, lum: f32, ay: vec3f, flat: f32, n: vec3f, weight: f32, id: vec4u }
 struct Vols { v: array<Vol, 4>, steps: f32, count: f32, kappa: f32, pad: f32 }
@@ -318,7 +328,17 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
   const inst = device.createBuffer({ size: bin.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
   queue.writeBuffer(inst, 0, bin);
   const add = { color: { srcFactor: 'one', dstFactor: 'one' }, alpha: { srcFactor: 'one', dstFactor: 'one' } };
-  const gl = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }] });
+  // the noise texture: seeded, so every visit sees the same galaxies
+  const noiseTex = device.createTexture({ size: [NOISE_N, NOISE_N, NOISE_N], dimension: '3d', format: 'r8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+  {
+    const d = new Uint8Array(NOISE_N ** 3); let a = 0x9e3779b9;
+    for (let i = 0; i < d.length; i++) { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; d[i] = (t ^ (t >>> 14)) >>> 24; }
+    queue.writeTexture({ texture: noiseTex }, d, { bytesPerRow: NOISE_N, rowsPerImage: NOISE_N }, [NOISE_N, NOISE_N, NOISE_N]);
+  }
+  const noiseView = noiseTex.createView(), noiseSmp = device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'repeat', addressModeV: 'repeat', addressModeW: 'repeat' });
+  const noiseL = [{ binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: '3d' } }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: {} }];
+  const noiseB = [{ binding: 2, resource: noiseView }, { binding: 3, resource: noiseSmp }];
+  const gl = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, ...noiseL] });
   const ll = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {} }] });
   const im = device.createShaderModule({ code: IMPOSTOR });
   const impostor = device.createRenderPipeline({
@@ -326,17 +346,17 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
     vertex: { module: im, entryPoint: 'vs', buffers: [{ arrayStride: 40, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'uint32x4' }, { shaderLocation: 1, offset: 16, format: 'float32x4' }, { shaderLocation: 2, offset: 32, format: 'float32' }, { shaderLocation: 3, offset: 36, format: 'uint32' }] }] },
     fragment: { module: im, entryPoint: 'fs', targets: [{ format: HDR, blend: add }] }, primitive: { topology: 'triangle-strip' },
   });
-  const gBind = device.createBindGroup({ layout: gl, entries: [{ binding: 0, resource: { buffer: globalsBuf } }] });
+  const gBind = device.createBindGroup({ layout: gl, entries: [{ binding: 0, resource: { buffer: globalsBuf } }, ...noiseB] });
   const layerData = new ArrayBuffer(80), lf = new Float32Array(layerData), li = new Int32Array(layerData);
   const layerBuf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const lBind = device.createBindGroup({ layout: ll, entries: [{ binding: 0, resource: { buffer: layerBuf } }] });
 
-  const vl = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, { binding: 1, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }] });
+  const vl = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, { binding: 1, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, ...noiseL] });
   const vm = device.createShaderModule({ code: VOLUME });
   const volume = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [vl] }), vertex: { module: vm, entryPoint: 'vs' }, fragment: { module: vm, entryPoint: 'fs', targets: [{ format: HDR }] } });
   const volData = new ArrayBuffer(4 * 80 + 16), vf = new Float32Array(volData), vu = new Uint32Array(volData);
   const volBuf = device.createBuffer({ size: volData.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-  const vBind = device.createBindGroup({ layout: vl, entries: [{ binding: 0, resource: { buffer: globalsBuf } }, { binding: 1, resource: { buffer: volBuf } }] });
+  const vBind = device.createBindGroup({ layout: vl, entries: [{ binding: 0, resource: { buffer: globalsBuf } }, { binding: 1, resource: { buffer: volBuf } }, ...noiseB] });
   const bm = device.createShaderModule({ code: BLIT });
   const blit = device.createRenderPipeline({ layout: 'auto', vertex: { module: bm, entryPoint: 'vs' }, fragment: { module: bm, entryPoint: 'fs', targets: [{ format: HDR, blend: add }] } });
   const fl2 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {} }] });
@@ -434,14 +454,16 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
     queue.writeBuffer(layerBuf, 0, layerData);
   }
   // the reduced-resolution volume pass (its own render pass), then blit + impostors inside the scene pass
-  function drawVolumes(enc) {
+  function drawVolumes(enc, timestampWrites) {
     if (!nVol) return false;
+    volAttach.timestampWrites = timestampWrites;
     const p = enc.beginRenderPass(volAttach); p.setPipeline(volume); p.setBindGroup(0, vBind); p.draw(3); p.end();
     return true;
   }
-  function draw(pass, hadVol) {
+  function draw(pass, hadVol, skip) {
     if (hadVol) { pass.setPipeline(blit); pass.setBindGroup(0, blitBind); pass.draw(3); }
-    if (fillOn) { pass.setPipeline(fillPipe); pass.setBindGroup(0, vBind); for (const L of fills) { pass.setBindGroup(1, L.bind); pass.draw(4, FN * FN * FN * L.c.per); } }
+    if (fillOn && !skip.fill) { pass.setPipeline(fillPipe); pass.setBindGroup(0, vBind); for (const L of fills) { pass.setBindGroup(1, L.bind); pass.draw(4, FN * FN * FN * L.c.per); } }
+    if (skip.imp) return;
     pass.setPipeline(impostor); pass.setBindGroup(0, gBind); pass.setBindGroup(1, lBind); pass.setVertexBuffer(0, inst); pass.draw(4, N);
   }
   return { update, drawVolumes, draw, resize, near, normal: (i, a) => f[i * 10 + 5 + a], names: meta.names, count: N, pos, radius: (i) => f[i * 10 + 4], absmag: (i) => (u[i * 10 + 3] >>> 16) * 0.001 - 40 };

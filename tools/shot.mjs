@@ -1,6 +1,7 @@
 // One-off renders for development: runs a snippet against the page's SH hooks, then saves the frame.
-//   node tools/shot.mjs --out /tmp/a.png [--size 1920x1080] [--pose 5] [--js "SH.cam.p[0] += 10"] [--wait 8] [--q 0] [--query fixed] [--headed]
+//   node tools/shot.mjs --out /tmp/a.png [--size 1920x1080] [--pose 5] [--js "SH.cam.p[0] += 10"] [--wait 8] [--q 0] [--query fixed] [--headed] [--uncapped]
 // --js runs after the pose is set (several --js are run in order, each followed by a settle); the snippet's value is printed.
+// --uncapped lets frames run as fast as they can: the GPU then stays at full clock, so SH.perf() times are comparable.
 // Needs `npm run data && npm run build:dev` first.
 import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -21,7 +22,7 @@ try {
   const browser = await chromium.launch({
     headless: !args.includes('--headed'),
     ...(process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : { channel: 'chrome' }),
-    args: ['--enable-unsafe-webgpu', '--enable-gpu', '--ignore-gpu-blocklist'],
+    args: ['--enable-unsafe-webgpu', '--enable-gpu', '--ignore-gpu-blocklist', ...(args.includes('--uncapped') ? ['--disable-frame-rate-limit', '--disable-gpu-vsync'] : [])],
   });
   const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.log('console: ' + m.text().slice(0, 600)); });

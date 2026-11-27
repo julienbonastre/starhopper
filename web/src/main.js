@@ -38,7 +38,7 @@ async function main() {
     initGalaxies(gpu, globalsBuf, base, quality)]);
   const post = initPost(gpu, quality);
 
-  const state = { frozen: false, shot: null, snap: 1, frames: 0 };
+  const state = { frozen: false, shot: null, snap: 1, frames: 0, skip: {} };   // skip: passes left out, for profiling
   // ---- view state
   let resScale = quality.startScale, W = 0, H = 0, pxScale = 1;
   const resize = () => {
@@ -232,14 +232,16 @@ async function main() {
     labels.update(dt, W, H, pxScale, kindGain);
 
     const enc = device.createCommandEncoder();
-    const hadVol = gal.drawVolumes(enc);
-    const sceneDesc = post.sceneAttach(); sceneDesc.timestampWrites = ts && !ts.busy ? tsBegin : undefined;
+    // the GPU timer runs from the first pass of the frame (the volume pass when there is one) to the last
+    const timed = ts && !ts.busy, sk = state.skip;
+    const hadVol = !sk.vol && gal.drawVolumes(enc, timed ? tsBegin : undefined);
+    const sceneDesc = post.sceneAttach(); sceneDesc.timestampWrites = timed && !hadVol ? tsBegin : undefined;
     const pass = enc.beginRenderPass(sceneDesc);
-    gal.draw(pass, hadVol);
-    galPts.draw(pass, pointGain);
-    lines.draw(pass);
-    stars.draw(pass, starGain);
-    labels.draw(pass);
+    if (!sk.gal) gal.draw(pass, hadVol, sk);
+    if (!sk.galPts) galPts.draw(pass, pointGain);
+    if (!sk.lines) lines.draw(pass);
+    if (!sk.stars) stars.draw(pass, starGain);
+    if (!sk.labels) labels.draw(pass);
     pass.end();
     post.run(enc, gpu.offscreen ? offView : gpu.ctx.getCurrentTexture().createView(), time, 0.09, ts && !ts.busy ? tsEnd : undefined);
     if (ts && !ts.busy) { enc.resolveQuerySet(ts.set, 0, 2, ts.resolve, 0); enc.copyBufferToBuffer(ts.resolve, 0, ts.read, 0, 16); }
