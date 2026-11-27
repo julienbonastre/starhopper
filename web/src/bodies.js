@@ -42,9 +42,12 @@ struct VO {
   let s0 = 0.62 * G.pxScale;
   // A planet close by would outshine everything at the exposure the stars are drawn at, and then turn into a far
   // dimmer disc: the point is held to the glare of a very bright star, and hands over to the disc as that appears.
-  let sigma = min(max(s0, sqrt(e / (6.2831853 * 2.6))), 3.0 * G.pxScale);
-  let w = smoothstep(0.7, 2.0, rpx);
-  let peak = min(e / (6.2831853 * sigma * sigma), 2.6) * (1.0 - smoothstep(0.8, 3.0, rpx));
+  // As the disc comes up toward a pixel across the glare is drawn in to the disc's own size, so that a planet
+  // is never a blur wider than the shape it is about to become.
+  let res = smoothstep(0.25, 0.9, rpx);
+  let sigma = min(max(s0, sqrt(e / (6.2831853 * 2.6))), mix(3.0 * G.pxScale, max(s0, rpx * 0.7), res));
+  let w = smoothstep(0.45, 1.3, rpx);
+  let peak = min(e / (6.2831853 * sigma * sigma), mix(2.6, 1.3, res)) * (1.0 - smoothstep(1.0, 2.6, rpx));
   let p = project(c.xyz);
   o.c = c; o.col = vec4f(col.rgb, rpx); o.sun = sun; o.ring = ring; o.psf = vec4f(peak, sigma, ex.y, w); o.mapped = ex.z;
   if ((peak < 0.0035 && w <= 0.0) || (p.z > 1.0 && sinA < 0.2)) { o.pos = vec4f(0.0, 0.0, 2.0, 1.0); return o; }
@@ -146,7 +149,8 @@ fn hash1(x: f32) -> f32 { return fract(sin(x * 127.1) * 43758.5453); }
           body = i.col.rgb * mix(0.5, 1.0, sea) * rough * 1.5 * max(lit, 0.0) * (0.8 + 0.2 * mu);
         }
       }
-      cover = 1.0;
+      // soften the limb over a pixel, so that a small disc is round and not a few square steps
+      cover = clamp((1.0 - sqrt(p2)) * i.col.a + 0.5, 0.0, 1.0); body *= cover;
       // shadow of the rings is left out; the planet's shadow on the rings is not
     } else if (kind == 1.0 && b > 0.0) {
       // glow of the atmosphere just outside the limb (scale height stretched so it is a visible thread)
