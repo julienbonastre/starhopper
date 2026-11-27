@@ -65,6 +65,8 @@ npm run serve       # http://localhost:8080
 
 Pushing to `main` builds, tests and deploys to GitHub Pages with no manual step.
 
+The title screen names the build (commit and its date). GitHub Pages lets browsers keep the page for ten minutes, so the page also asks what is deployed and offers a newer build when there is one.
+
 Every open pull request from a branch of this repository also gets a preview at `https://julienbonastre.github.io/starhopper/pr/<number>/`, linked from a comment on the pull request and marked with a red "Preview" badge. It is rebuilt a few minutes after each push and removed when the pull request closes. A preview that leaves `pipeline/` alone is only its page and reads the live site's data.
 
 ## Measured
