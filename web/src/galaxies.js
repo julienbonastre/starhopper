@@ -82,7 +82,7 @@ fn galEmit(q: vec3f, qn: vec3f, p: GalP, sd: f32, detail: f32, t: f32, foot: f32
   let c2 = 0.5 + 0.5 * cos(2.0 * ph + 1.3 - wob * 1.6);          // spurs and secondary arms at twice the count
   let inner = smoothstep(0.04, 0.22, r) * (1.0 - 0.6 * smoothstep(0.8, 1.4, r));     // arms calm down toward the rim
   let c4 = c * c * c * c;
-  let arm = c4 * 2.85 + c2 * c2 * 0.59;                         // main arms + spurs; mean 1 around the circle
+  let arm = c4 * 2.05 + c2 * c2 * 1.17;                         // main arms + spurs; mean 1 around the circle
   if (detail > 0.0) { let n = galNoise(qn, sd, t, foot); n1 = n.x; n2 = n.y; nc = n.z; nf = n.w; }
   let clumps = mix(1.0, 0.25 + 1.5 * n1, p.clump * (0.5 + 0.5 * detail));
   // star formation is patchy along the arms: they break into bright stretches and gaps
@@ -94,7 +94,7 @@ fn galEmit(q: vec3f, qn: vec3f, p: GalP, sd: f32, detail: f32, t: f32, foot: f32
   col += HII * disc * smoothstep(0.62, 0.8, n2) * arm * inner * (p.armC + p.clump * 0.6) * 1.5 * detail;
   if (p.bar > 0.0) {
     let a = p.phase * 0.5; let xb = vec2f(q.x * cos(a) + q.y * sin(a), -q.x * sin(a) + q.y * cos(a));
-    col += OLD * p.bar * (1.0 - p.fb) * 2.6 * exp(-(xb.x * xb.x) / 0.045 - (xb.y * xb.y) / 0.0035 - q.z * q.z / 0.003);
+    col += OLD * p.bar * (1.0 - p.fb) * 6.5 * exp(-(xb.x * xb.x) / 0.03 - (xb.y * xb.y) / 0.0028 - q.z * q.z / 0.003);
   }
   let cd = 0.5 + 0.5 * cos(ph + 0.85);
   // dust: a thin, patchy layer. Its mid-plane wanders and its density comes in clouds, so that seen edge-on (or from
