@@ -160,7 +160,7 @@ async function main() {
     else if (code === 'KeyM') { show.sound = setSound(!show.sound); syncToggles(); keep('starhopperSound', show.sound ? 1 : 0); flash(show.sound ? 'Sound on' : 'Sound off'); }
     else if (code === 'KeyV') { show.trails = !show.trails; flash(show.trails ? 'Speed streaks on' : 'Speed streaks off'); }
     else if (code === 'KeyP') { show.proc = !show.proc; syncToggles(); flash(show.proc ? 'Procedural fill on' : 'Measured data only'); }
-    else if (/^Digit[1-8]$/.test(code)) { freshNight(); setPose(+code[5] - 1); state.snap = 1; flash(POSES[+code[5] - 1].name); }
+    else if (/^Digit[1-8]$/.test(code)) { cancelGoto(); halt(); freshNight(); setPose(+code[5] - 1); state.snap = 1; flash(POSES[+code[5] - 1].name); }
     else if (code === 'Unlocked' && !params.has('auto')) { body.classList.remove('fly'); if (flight.wheel) flight.thr = 0; }   // the menu is a pause: a scrolled throttle is let go
     else if (code === 'KeyB' && params.has('bench')) { flash('Benchmark running'); runBench().then((r) => { showPerf = true; $('perf').hidden = false; console.log(JSON.stringify(r)); flash('Benchmark done'); $('s').textContent = JSON.stringify(r); body.classList.remove('fly'); }); }
   });
@@ -247,7 +247,9 @@ async function main() {
     $('crb').innerHTML = m.sources.map((x) => `<p><a href="${x.home}" target="_blank" rel="noopener">${x.title}</a><br>${x.credit}. ${x.licence}.</p>`).join('') + '<p>Procedural fill (galaxy shapes, the Milky Way beyond the catalogue, fill stars) is a model, not data. Press P to hide it.</p>';
   }).catch(() => {});
   // back to low orbit over the daylight side, where every visit begins
-  const toEarth = () => { const s = bodies.launch(); cancelGoto(); flight.vel.fill(0); flight.thr = 0; cam.p.set(s.p); lookQuat(cam.q, s.at[0] - s.p[0], s.at[1] - s.p[1], s.at[2] - s.p[2], s.up[0], s.up[1], s.up[2]); basis(); state.snap = 1; };
+  // come to rest: no speed, the throttle back at zero and Hold let go
+  const halt = () => { flight.vel.fill(0); flight.thr = 0; flight.cruise = false; $('cz').classList.remove('on'); };
+  const toEarth = () => { const s = bodies.launch(); cancelGoto(); halt(); cam.p.set(s.p); lookQuat(cam.q, s.at[0] - s.p[0], s.at[1] - s.p[1], s.at[2] - s.p[2], s.up[0], s.up[1], s.up[2]); basis(); state.snap = 1; };
   const launch = () => {
     body.classList.add('fly');
     // from now on the menu is a pause: its main button resumes, and a second one starts over from the Earth
@@ -274,14 +276,14 @@ async function main() {
   // (a mouse click only: the click a phone makes up after a tap must not lock the pointer, which swallows every touch after it)
   canvas.onclick = (e) => { if (!body.classList.contains('fly') || MOBILE || (e.pointerType && e.pointerType !== 'mouse')) return; if (flight.locked) pick(cam.fwd[0], cam.fwd[1], cam.fwd[2]); else canvas.requestPointerLock?.()?.catch?.(() => {}); };
   // viewpoints and save points (kept in this browser only)
-  POSES.forEach((p, i) => { const b = document.createElement('button'); b.textContent = p.name; b.onclick = () => { cancelGoto(); freshNight(); setPose(i); state.snap = 1; launch(); flash(p.name); }; $('vp').append(b); });
+  POSES.forEach((p, i) => { const b = document.createElement('button'); b.textContent = p.name; b.onclick = () => { cancelGoto(); halt(); freshNight(); setPose(i); state.snap = 1; launch(); flash(p.name); }; $('vp').append(b); });
   let saves = []; try { saves = JSON.parse(localStorage.starhopperSaves || '[]'); } catch {}
   const drawSaves = () => {
     $('svl').textContent = '';
     saves.forEach((s, i) => {
       const w = document.createElement('span'), go = document.createElement('button'), del = document.createElement('button');
       go.textContent = s.n; del.textContent = '\u00d7'; del.title = 'Forget this place';
-      go.onclick = () => { cancelGoto(); flight.vel.fill(0); cam.p.set(s.p); cam.q.set(s.q); basis(); state.snap = 1; launch(); flash(s.n); };
+      go.onclick = () => { cancelGoto(); halt(); cam.p.set(s.p); cam.q.set(s.q); basis(); state.snap = 1; launch(); flash(s.n); };
       del.onclick = () => { saves.splice(i, 1); keep('starhopperSaves', JSON.stringify(saves)); drawSaves(); };
       w.append(go, del); $('svl').append(w);
     });
@@ -382,7 +384,7 @@ async function main() {
   let last = performance.now(), time = 0, frames = 0, fpsT = 0, fps = 0, cpuMs = 0;
   const dts = new Float32Array(128), dtSort = new Float32Array(128);
   let busy = false, exoFade = 0, conFade = 0, nameFade = 0, labelT = 1, pointGain = 1, procFade = 1;
-  let starCtx = 1;
+  let starCtx = 1, wasGoing = false;
   const trail = new Float64Array(3), trailP = new Float64Array(3), rode = new Float64Array(3);   // streak vector, last camera place, how far a planet carried the camera this frame
   const DIFFUSE = 24;   // extended light is lifted relative to point sources, as dark-adapted eyes do
   const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -408,6 +410,9 @@ async function main() {
     flight.context = Math.min(ctx, 3e8);
     const bn = bodies.near;
     if (bn.id >= 0) flight.context = Math.min(flight.context, Math.max(bn.alt, bodies.radius(bn.id) * 0.02));
+    // a fly-to that has just ended leaves the throttle at rest, not at whatever pace it was being hurried along at
+    if (wasGoing && !flight.goto && flight.thr) halt();
+    wasGoing = !!flight.goto;
     tick(now);   // the clock first, so that the flight, the lock and the picture all use this frame's positions
     // Lock: the camera keeps facing the target, and its range changes only while thrust toward or away from it is on,
     // so thrust sideways or up and down carries it around the target in a circle.
@@ -416,7 +421,9 @@ async function main() {
     if (locked) { lx = target.x - p0x; ly = target.y - p0y; lz = target.z - p0z; ld = Math.hypot(lx, ly, lz); }
     if (!state.frozen) updateFlight(dt); else basis();
     if (locked && ld > 0) {
-      const toward = ((cam.p[0] - p0x) * lx + (cam.p[1] - p0y) * ly + (cam.p[2] - p0z) * lz) / ld, want = flight.ahead ? Math.max(ld - toward, target.stop * 0.25) : ld;
+      const toward = ((cam.p[0] - p0x) * lx + (cam.p[1] - p0y) * ly + (cam.p[2] - p0z) * lz) / ld, floor = target.stop * 0.25, want = flight.ahead ? Math.max(ld - toward, floor) : ld;
+      // as close as the lock goes: a throttle still pushing would only read as speed that goes nowhere
+      if (flight.ahead && toward > 0 && ld - toward <= floor && (flight.thr > 0 || flight.cruise)) { halt(); flash('Arrived at ' + target.name); }
       let dx = target.x - cam.p[0], dy = target.y - cam.p[1], dz = target.z - cam.p[2]; const d = Math.hypot(dx, dy, dz);
       if (d > 0) {
         const k = want / d; cam.p[0] = target.x - dx * k; cam.p[1] = target.y - dy * k; cam.p[2] = target.z - dz * k;
