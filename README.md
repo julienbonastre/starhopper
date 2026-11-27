@@ -72,11 +72,11 @@ On a MacBook Pro (M5 Pro, 20 GPU cores), Chrome 158, macOS 26.7, High detail, 30
 | | average | 99th percentile | maximum |
 |---|---|---|---|
 | Frame interval | 8.33 ms | 10.3 ms | 10.4 ms |
-| GPU time per frame | 4.03 ms | 6.32 ms | 7.96 ms |
+| GPU time per frame | 4.47 ms | 6.33 ms | 9.23 ms |
 
-- No frame was presented late (0 of 10,849).
-- No GPU sample of 10,218 exceeded 8.3 ms.
-- JS heap at the end of the run: 40 MB.
+- No frame was presented late (0 of 10,850).
+- One GPU sample of 10,006 exceeded 8.3 ms (it comes and goes between runs, at the instant the last leg starts, and never delays a frame).
+- JS heap at the end of the run: 38 MB.
 
 Sizes:
 
