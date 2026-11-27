@@ -10,6 +10,7 @@ import { initLines } from './lines.js';
 import { initLabels } from './labels.js';
 import { POSES, setPose, place } from './poses.js';
 import { initBodies } from './bodies.js';
+import { initDeep } from './deep.js';
 import { PLANETS, orbitPoints, jdNow } from './solar.js';
 
 const body = document.body, canvas = $('c');
@@ -39,6 +40,7 @@ async function main() {
     initPoints(gpu, globalsBuf, base + 'galaxies/', quality, { budget: 400_000, track: false, magOff: 40, sigma0: 1.0 }),
     initGalaxies(gpu, globalsBuf, base, quality)]);
   const post = initPost(gpu, quality);
+  const deep = await initDeep(gpu, globalsBuf, base, gal.noise);
   // the planets are placed for today's date (?jd= pins it, for repeatable renders)
   const jd = +(params.get('jd') || 0) || jdNow();
   const bodies = initBodies(gpu, globalsBuf, base, jd);
@@ -97,8 +99,11 @@ async function main() {
       labels.add(pl.name, 'body', bodies.pos(i + 1, 0), bodies.pos(i + 1, 1), bodies.pos(i + 1, 2), NaN, 0.004, bodies.radius(i + 1) * 2.5, -10, bodies.radius(i + 1));
     });
   }
+  for (let i = 0; i < deep.count; i++) if (deep.labelled(i)) labels.add(deep.name(i), 'deep', deep.pos(i, 0), deep.pos(i, 1), deep.pos(i, 2), deep.absmag(i) + 2, Infinity, deep.radius(i) * 1.2, 0, deep.radius(i));
   labels.occluder(bodies.hides);
   place(0, bodies.night());
+  // "Inside the Orion nebula" goes where the catalogue puts it: a little in from the near edge, looking through the heart
+  { const i = deep.find('Great Orion Nebula'); if (i >= 0) { const c = [deep.pos(i, 0), deep.pos(i, 1), deep.pos(i, 2)], n = Math.hypot(...c), k = 1 - deep.radius(i) * 0.55 / n; place(3, { p: [c[0] * k, c[1] * k, c[2] * k], at: c, up: [0, 0, 1] }); } }
   // the picture comes first: figures and names are off until asked for
   const show = { lines: false, names: false, proc: true, sound: false };
   const labelLimit = { star: 0, con: 0, body: 0, deep: 0, galaxy: 0, target: 99 };
@@ -141,10 +146,11 @@ async function main() {
   document.querySelectorAll('#tg button').forEach((b) => { b.onclick = () => { show[b.dataset.k] = !show[b.dataset.k]; b.classList.toggle('on', show[b.dataset.k]); }; });
   const syncToggles = () => document.querySelectorAll('#tg button').forEach((b) => b.classList.toggle('on', show[b.dataset.k]));
   // search: every named star and galaxy; Enter flies to the best match, stopping a comfortable distance short
-  // rows: search key, shown name, position, where a fly-to stops, absolute magnitude, kind (0 star, 1 galaxy, 2 planet), radius
+  // rows: search key, shown name, position, where a fly-to stops, absolute magnitude, kind (0 star, 1 galaxy, 2 planet, 3 nebula or cluster), radius
   const index = [];
   for (const s of names.stars) { if (s[0]) index.push([s[0].toLowerCase(), s[0], s[2], s[3], s[4], 0.0004, s[5], 0, 0]); if (s[1]) index.push([s[1].toLowerCase(), s[0] || s[1], s[2], s[3], s[4], 0.0004, s[5], 0, 0]); }
   gal.names.forEach((n, i) => index.push([n[0].toLowerCase(), n[0], gal.pos(i, 0), gal.pos(i, 1), gal.pos(i, 2), gal.radius(i) * 3.2, gal.absmag(i), 1, gal.radius(i)]));
+  for (let i = 0; i < deep.count; i++) index.push([deep.name(i).toLowerCase(), deep.name(i), deep.pos(i, 0), deep.pos(i, 1), deep.pos(i, 2), deep.radius(i) * 2.6, deep.absmag(i), 3, deep.radius(i)]);
   for (let i = 1; i < bodies.count; i++) index.push([bodies.names[i].toLowerCase(), bodies.names[i], bodies.pos(i, 0), bodies.pos(i, 1), bodies.pos(i, 2), bodies.radius(i) * 4, -99, 2, bodies.radius(i)]);
   // target whatever lies closest to a view ray (unit vector), among the things bright enough to be on screen
   let curMag = 6, curGal = 12;
@@ -240,6 +246,7 @@ async function main() {
     let ctx = Math.max(2e-7, stars.near.dist);
     if (gn.id >= 0) ctx = Math.min(ctx, Math.max(gn.edge, gal.radius(gn.id) * 0.03));
     if (show.proc) ctx = Math.min(ctx, gn.spacing);
+    if (deep.near.id >= 0) ctx = Math.min(ctx, Math.max(deep.near.edge, deep.radius(deep.near.id) * 0.15));
     flight.context = Math.min(ctx, 3e8);
     const bn = bodies.near;
     if (bn.id >= 0) flight.context = Math.min(flight.context, Math.max(bn.alt, bodies.radius(bn.id) * 0.02));
@@ -281,6 +288,7 @@ async function main() {
     stars.update(magLimit);
     galPts.update(galLimit);
     gal.update(W, H, pxScale, pointGain, starGain);
+    deep.update();
 
     gf[0] = cam.right[0]; gf[1] = cam.right[1]; gf[2] = cam.right[2]; gf[3] = 1 / Math.tan(cam.fov / 2);
     gf[4] = cam.up[0]; gf[5] = cam.up[1]; gf[6] = cam.up[2]; gf[7] = W / H;
@@ -314,6 +322,7 @@ async function main() {
     const sceneDesc = post.sceneAttach(); sceneDesc.timestampWrites = timed && !hadVol ? tsBegin : undefined;
     const pass = enc.beginRenderPass(sceneDesc);
     if (!sk.gal) gal.draw(pass, hadVol, sk);
+    if (!sk.deep) deep.draw(pass);
     if (!sk.galPts) galPts.draw(pass, pointGain);
     if (!sk.lines) lines.draw(pass);
     if (!sk.stars) stars.draw(pass, starGain);
@@ -386,6 +395,6 @@ async function main() {
     const budget = period * 1000;
     return { frameMs: stat(b.frame), gpuMs: stat(b.gpu), late: b.frame.filter((x) => x > budget * 1.6).length, gpuOver: b.gpu.filter((x) => x > 8.3).length, size: [W, H], scale: resScale, level: LEVEL, mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null };
   };
-  window.SH = { bodies, pick, target, labels, bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
+  window.SH = { deep, bodies, pick, target, labels, bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
 }
 main().catch((e) => { console.error(e); body.className = 'l e'; $('s').textContent = (e.cause ? '' : 'Failed to start: ') + e.message; });

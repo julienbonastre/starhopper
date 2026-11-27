@@ -481,5 +481,5 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
     if (skip.imp) return;
     pass.setPipeline(impostor); pass.setBindGroup(0, gBind); pass.setBindGroup(1, lBind); pass.setVertexBuffer(0, inst); pass.draw(4, N);
   }
-  return { update, drawVolumes, draw, resize, near, normal: (i, a) => f[i * 10 + 5 + a], names: meta.names, count: N, pos, radius: (i) => f[i * 10 + 4], absmag: (i) => (u[i * 10 + 3] >>> 16) * 0.001 - 40 };
+  return { noise: { view: noiseView, sampler: noiseSmp }, update, drawVolumes, draw, resize, near, normal: (i, a) => f[i * 10 + 5 + a], names: meta.names, count: N, pos, radius: (i) => f[i * 10 + 4], absmag: (i) => (u[i * 10 + 3] >>> 16) * 0.001 - 40 };
 }

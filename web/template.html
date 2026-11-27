@@ -13,7 +13,7 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--fg); font: 
 canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 #hud { position: fixed; right: max(12px, env(safe-area-inset-right)); top: max(10px, env(safe-area-inset-top)); min-width: 190px; padding: 8px 12px 9px; font-size: 12px; font-variant-numeric: tabular-nums; letter-spacing: .02em; background: #06080cb0; border: 1px solid #ffffff14; border-radius: 10px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); pointer-events: none; opacity: 0; transition: opacity .4s; }
 body.fly #hud { opacity: .92; }
-#hud b { display: inline-block; min-width: 5.6em; font-weight: 500; color: var(--dim); text-transform: uppercase; font-size: 9.5px; letter-spacing: .12em; }
+#hud b { display: inline-block; min-width: 7.4em; font-weight: 500; color: var(--dim); text-transform: uppercase; font-size: 9.5px; letter-spacing: .12em; }
 #hud div { white-space: nowrap; }
 #scale { margin-bottom: 4px; text-transform: uppercase; letter-spacing: .18em; font-size: 9.5px; color: var(--acc); }
 #msg { position: fixed; left: 0; right: 0; top: 18%; text-align: center; letter-spacing: .3em; text-transform: uppercase; font-size: 12px; color: var(--fg); text-shadow: 0 0 8px #000; opacity: 0; transition: opacity .6s; pointer-events: none; }
@@ -32,7 +32,8 @@ h1 { margin: 0; font-weight: 200; font-size: clamp(34px, 7vw, 54px); letter-spac
 #b { height: 100%; background: var(--acc); transform-origin: 0 50%; transform: scaleX(0); transition: transform .4s; }
 #s { color: var(--dim); min-height: 1.5em; font-size: 12px; }
 body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
-#keys { margin: 18px auto 0; display: grid; grid-template-columns: auto auto; gap: 3px 14px; justify-content: center; text-align: left; color: var(--dim); font-size: 12px; }
+#kd { margin-top: 14px; font-size: 11px; color: var(--dim); } #kd summary { cursor: pointer; }
+#keys { margin: 10px auto 0; display: grid; grid-template-columns: auto auto; gap: 3px 14px; justify-content: center; text-align: left; color: var(--dim); font-size: 12px; }
 #keys kbd { font: inherit; color: var(--fg); }
 #find { width: 100%; margin-top: 18px; font: inherit; color: var(--fg); background: #ffffff10; border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; outline: none; -webkit-user-select: text; user-select: text; }
 #find:focus { border-color: var(--acc); }
@@ -48,7 +49,7 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 #lv button.on, #tg button.on { color: #000; background: var(--fg); border-color: var(--fg); }
 #foot { margin-top: 16px; font-size: 11px; color: var(--dim); } #foot a { color: inherit; }
 #menu { position: fixed; top: max(10px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); padding: 8px 12px; display: none; z-index: 4; backdrop-filter: blur(4px); }
-@media (pointer: coarse) { body.fly #menu { display: block; } #keys { display: none; } }
+@media (pointer: coarse) { body.fly #menu { display: block; } #kd { display: none; } }
 </style>
 </head>
 <body class="l">
@@ -63,11 +64,11 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 <button id="go" disabled>Launch</button>
 <div id="bar"><div id="b"></div></div>
 <div id="s">Starting up</div>
-<div id="keys">
+<details id="kd"><summary>Controls</summary><div id="keys">
 <kbd>W A S D</kbd><span>fly</span><kbd>Mouse</kbd><span>look</span><kbd>R / F</kbd><span>up / down</span><kbd>Q / E</kbd><span>roll</span>
 <kbd>Wheel</kbd><span>throttle</span><kbd>Shift / Ctrl</kbd><span>&times;10 / &divide;10</span><kbd>Click</kbd><span>target what you look at</span><kbd>G</kbd><span>fly to the target</span><kbd>1 &ndash; 8</kbd><span>viewpoints</span><kbd>Home</kbd><span>back to Earth</span><kbd>L N P</kbd><span>lines, names, fill</span><kbd>M</kbd><span>sound</span><kbd>[ ]</kbd><span>exposure</span><kbd>Tab / H</kbd><span>hide panel / frame stats</span><kbd>Esc</kbd><span>this menu</span>
-</div>
-<input id="find" type="search" placeholder="Fly to a star or galaxy: Vega, Andromeda, M 87 ..." autocomplete="off" spellcheck="false">
+</div></details>
+<input id="find" type="search" placeholder="Fly to a star, planet, nebula or galaxy: Vega, Saturn, M 42, Andromeda ..." autocomplete="off" spellcheck="false">
 <div id="tg"><button data-k="lines">Constellations</button><button data-k="names">Names</button><button data-k="proc" class="on">Procedural fill</button><button data-k="sound">Sound</button></div>
 <div id="vp"></div>
 <div id="sv"><input id="svn" type="text" maxlength="40" placeholder="Name this place to save it" autocomplete="off" spellcheck="false"><button id="svb">Save</button></div>
