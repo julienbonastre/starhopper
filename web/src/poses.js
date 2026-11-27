@@ -16,7 +16,7 @@ export const POSES = [
   { name: 'Among the Pleiades', p: add(pleiades, unit(pleiades), -7), at: pleiades, up: north },
   { name: 'Inside the Orion nebula', p: add(orionNeb, unit(orionNeb), -3.5), at: orionNeb, up: north },
   { name: 'Above the galactic disc', p: add(add(GC, NGP, 26000), unit(GC), -9000), at: GC, up: unit(GC) },
-  { name: 'Approaching Andromeda', p: add(m31, unit(m31), -95000), at: m31, up: NGP },
+  { name: 'Approaching Andromeda', p: add(m31, unit(m31), -52000), at: m31, up: NGP },
   { name: 'The Local Group', p: add(add(m31, [0, 0, 0], 0.5), NGP, 1.1e6), at: add(m31, [0, 0, 0], -0.45), up: unit(m31) },
   { name: 'The cosmic web', p: add(virgo, NGP, 5.5e7), at: virgo, up: unit(GC) },
 ];

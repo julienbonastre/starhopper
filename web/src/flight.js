@@ -13,7 +13,7 @@ export const flight = {
 };
 const keys = new Set();
 let lookX = 0, lookY = 0, touch = new Map();
-const go = { on: false, t: 0, dur: 7, from: new Float64Array(3), to: new Float64Array(3), stop: 0, q0: new Float64Array(4), q1: new Float64Array(4), d0: 1 };
+const go = { on: false, slow: false, t: 0, dur: 7, from: new Float64Array(3), to: new Float64Array(3), stop: 0, q0: new Float64Array(4), q1: new Float64Array(4), d0: 1 };
 const _q = new Float64Array(4);
 
 export function initInput(canvas, onAction) {
@@ -46,13 +46,15 @@ export function initInput(canvas, onAction) {
 }
 
 // start an eased flight to a point, stopping `stop` parsecs short of it
-export function flyTo(x, y, z, stop, dur = 7) {
+// (q1: an orientation to arrive with, turned to steadily over the whole flight; otherwise the camera faces the target)
+export function flyTo(x, y, z, stop, dur = 7, q1 = null) {
   go.on = true; go.t = 0; go.dur = dur;
   go.from.set(cam.p); go.to[0] = x; go.to[1] = y; go.to[2] = z; go.stop = stop;
   const dx = x - cam.p[0], dy = y - cam.p[1], dz = z - cam.p[2];
   go.d0 = Math.hypot(dx, dy, dz);
   go.q0.set(cam.q);
-  if (go.d0 > stop * 1.0001) lookQuat(go.q1, dx, dy, dz, cam.up[0], cam.up[1], cam.up[2]); else go.q1.set(cam.q);
+  go.slow = !!q1;
+  if (q1) go.q1.set(q1); else if (go.d0 > stop * 1.0001) lookQuat(go.q1, dx, dy, dz, cam.up[0], cam.up[1], cam.up[2]); else go.q1.set(cam.q);
   flight.goto = go;
 }
 export const cancelGoto = () => { go.on = false; flight.goto = null; };
@@ -75,7 +77,7 @@ export function updateFlight(dt) {
   if (go.on) {
     // travel along the line with the remaining distance shrinking geometrically, so every scale gets equal time
     go.t = Math.min(1, go.t + dt / go.dur);
-    const turn = Math.min(1, go.t * 5), s = ease(go.t);
+    const turn = go.slow ? go.t : Math.min(1, go.t * 5), s = ease(go.t);
     slerp(_q, go.q0, go.q1, ease(turn)); cam.q.set(_q); basis();
     const d0 = go.d0, d1 = Math.min(go.stop, d0), rem = d0 <= d1 ? d1 : d0 * Math.pow(d1 / d0, s), f = d0 > 0 ? 1 - rem / d0 : 0;
     const ox = cam.p[0], oy = cam.p[1], oz = cam.p[2];

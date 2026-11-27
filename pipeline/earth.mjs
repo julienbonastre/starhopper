@@ -9,13 +9,13 @@ import { fetchSource, writeOut } from './lib.mjs';
 
 export const EARTH_SOURCES = {
   earth: {
-    title: 'Blue Marble: Next Generation, July 2004, base map (5400 x 2700)',
-    url: 'https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-base/july/world.200407.3x5400x2700.jpg',
-    sha256: 'f55226d46d27e05511f2118dc6aa24f5dbf9b6b2cddc87cc6e0e7dd067c00b11',
-    file: 'bmng_200407_5400x2700.jpg',
+    title: 'Blue Marble: Next Generation, July 2004, with topography and bathymetry (5400 x 2700)',
+    url: 'https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-topography-bathymetry/july/world.topo.bathy.200407.3x5400x2700.jpg',
+    sha256: '4f4240673a3a1b173d61b92ca4b07bac5fd17059ea5f725ba6da5a9c5386b7ba',
+    file: 'bmng_topo_bathy_200407_5400x2700.jpg',
     licence: 'Public domain (NASA)',
     credit: 'NASA Earth Observatory: Reto Stockli, Blue Marble Next Generation, from Terra/MODIS data',
-    home: 'https://science.nasa.gov/earth/earth-observatory/blue-marble-next-generation/base-map/',
+    home: 'https://science.nasa.gov/earth/earth-observatory/blue-marble-next-generation/base-topography-bathymetry/',
   },
 };
 

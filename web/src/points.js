@@ -24,11 +24,11 @@ fn starColour(bv: f32) -> vec3f {
   if (x >= 66.0) { c.b = 1.0; } else if (x <= 19.0) { c.b = 0.0; } else { c.b = clamp(0.543207 * log(x - 10.0) - 1.196254, 0.0, 1.0); }
   c = pow(c, vec3f(2.2));
   let l = dot(c, vec3f(0.2126, 0.7152, 0.0722));
-  return mix(vec3f(1.0), c / l, 1.25); // a little extra saturation: star colours are subtle
+  return mix(vec3f(1.0), c / l, 1.7);  // extra saturation: star colours are subtle, and the eye wants to see them
 }
 
-const PEAK = 2.6;     // brighter stars grow instead of exceeding this centre value
-const CORE = 5.5;     // ... up to this sigma in CSS pixels
+const PEAK = 1.2;     // brighter stars grow instead of exceeding this centre value
+const CORE = 6.5;     // ... up to this sigma in CSS pixels
 @vertex fn vs(@builtin(vertex_index) vi: u32, @location(0) s: vec4u) -> VO {
   var o: VO;
   let corner = vec2f(f32(vi & 1u) * 2.0 - 1.0, f32(vi >> 1u) * 2.0 - 1.0);
@@ -55,6 +55,12 @@ const CORE = 5.5;     // ... up to this sigma in CSS pixels
   o.pos = vec4f(p.xy + corner * half * 2.0 / G.viewport, 0.5, 1.0);
   o.uv = corner * half;
   o.col = starColour(f32((s.w >> 8u) & 255u) / 80.0 - 0.5);
+  if (L.sigma0 > 0.9) {
+    // the galaxy layer: no two galaxies are alike, so each point gets its own size and tint (from its position)
+    var hsh = fract(vec3f(s.xyz & vec3u(65535u)) * vec3f(0.1031, 0.1030, 0.0973)); hsh += dot(hsh, hsh.yzx + 33.33);
+    let k = fract((hsh.x + hsh.y) * hsh.z);
+    o.col = mix(vec3f(1.0, 0.80, 0.58), vec3f(0.66, 0.80, 1.0), k * k);
+  }
   o.prm = vec4f(peak, sigma, reach / sigma, min(0.05 * over, 0.6) * glare);
   return o;
 }
@@ -66,7 +72,7 @@ const CORE = 5.5;     // ... up to this sigma in CSS pixels
   let halo = i.prm.w / (1.0 + r2 * 0.35) * q * q;
   // faint wide skirt on bright stars, fading to zero at the quad edge
   let skirt = 0.035 / (1.0 + r2 * r2 * 0.08) * max(0.0, 1.0 - r2 / 12.96) * smoothstep(1.2, 3.0, i.prm.y / G.pxScale);
-  return vec4f(i.col * i.prm.x * (core + skirt) + mix(i.col, vec3f(1.0), 0.5) * halo, 1.0);
+  return vec4f(i.col * i.prm.x * (core + skirt) + mix(i.col, vec3f(1.0), 0.8) * halo, 1.0);
 }`;
 
 const MAX_DRAW = 2048, FETCHES = 8, SCAN_PER_FRAME = 60000, UPLOAD_PER_FRAME = 400_000;   // bytes

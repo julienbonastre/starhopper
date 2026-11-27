@@ -48,7 +48,7 @@ async function main() {
   let deep = { count: 0, near: { id: -1, edge: Infinity }, update() {}, draw() {}, hasBig: () => false }, markers = { count: 0, update() {}, draw() {} };
   // the planets are placed for today's date (?jd= pins it, for repeatable renders)
   const jd = +(params.get('jd') || 0) || jdNow();
-  const bodies = initBodies(gpu, globalsBuf, base, jd, LEVEL === 0 ? 4096 : 2048);
+  const bodies = initBodies(gpu, globalsBuf, base, jd, gal.noise, LEVEL === 0 ? 0 : 2048);
 
   const state = { frozen: false, shot: null, snap: 1, frames: 0, skip: {} };   // skip: passes left out, for profiling
   // ---- view state
@@ -252,7 +252,7 @@ async function main() {
   let last = performance.now(), time = 0, frames = 0, fpsT = 0, fps = 0, cpuMs = 0;
   const dts = new Float32Array(128), dtSort = new Float32Array(128);
   let busy = false, exoFade = 0, conFade = 0, nameFade = 0, labelT = 1, pointGain = 1, procFade = 1;
-  const DIFFUSE = 20;   // extended light is lifted relative to point sources, as dark-adapted eyes do
+  const DIFFUSE = 28;   // extended light is lifted relative to point sources, as dark-adapted eyes do
   const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   function frame(now) {
     requestAnimationFrame(frame);
@@ -284,8 +284,8 @@ async function main() {
     //  - down, when a nearby star is in view
     //  - up by a few magnitudes once outside a galaxy's disc, so its surface brightness reads well
     //  - (points only) up further in the voids, so that distant galaxies show: pointGain
-    const gainSB = 2.1 * sm(0.6, 2.0, out) + 1.0 * sm(3, 30, env);
-    const gainPt = Math.min(6.5, 2.6 * Math.log10(Math.max(env / 1.3, 1)));
+    const gainSB = 1.75 * sm(0.6, 2.0, out) + 1.0 * sm(3, 30, env);
+    const gainPt = Math.min(6.5, 2.6 * Math.log10(Math.max(env / 0.8, 1)));
     const n = stars.near;
     let target = exposureBase * Math.pow(10, 0.4 * gainSB);
     if (n.dist < 1e6) {
@@ -294,7 +294,7 @@ async function main() {
       const inView = Math.max(0, Math.min(1, (cosA - 0.72) / 0.16));     // only while it is on screen: there is no air out here to scatter it
       const e1 = Math.pow(10, -0.4 * n.absmag) * 100 / (d * d);         // its energy at exposure 1
       // only part of the way: the star still glares, and the brightest background stars stay in sight
-      if (e1 * inView * target > E_MAX) target *= Math.pow(E_MAX / (e1 * inView * target), 0.62);
+      if (e1 * inView * target > E_MAX) target *= Math.pow(E_MAX / (e1 * inView * target), 0.22);
     }
     if (state.snap) { exposure = target; pointGain = Math.pow(10, 0.4 * gainPt); if (state.snap++ > 3) state.snap = 0; }
     exposure *= Math.pow(target / exposure, 1 - Math.exp(-dt * (target < exposure ? 6 : 1.5)));
@@ -354,7 +354,7 @@ async function main() {
     if (!sk.bodies) bodies.draw(pass);
     if (!sk.labels) labels.draw(pass);
     pass.end();
-    post.run(enc, gpu.offscreen ? offView : gpu.ctx.getCurrentTexture().createView(), time, 0.09, timed ? tsEnd : undefined);
+    post.run(enc, gpu.offscreen ? offView : gpu.ctx.getCurrentTexture().createView(), time, 0.13, timed ? tsEnd : undefined);
     if (timed) { enc.resolveQuerySet(ts.set, 0, 2, ts.resolve, 0); enc.copyBufferToBuffer(ts.resolve, 0, ts.read, 0, 16); }
     queue.submit([enc.finish()]);
     if (timed) { ts.busy = true; ts.read.mapAsync(GPUMapMode.READ).then(gpuDone, gpuFail); }
@@ -415,16 +415,19 @@ async function main() {
   await extras.catch((e) => console.error(e));
   // hooks for the tests, the benchmark and screenshots
   // scripted fly-through of all eight viewpoints (about 90 s); resolves with frame and GPU time statistics
+  // fly to a viewpoint and arrive looking the way it looks
+  const poseQ = new Float64Array(4);
+  const flyPose = (i, secs) => { const p = POSES[i]; lookQuat(poseQ, p.at[0] - p.p[0], p.at[1] - p.p[1], p.at[2] - p.p[2], p.up[0], p.up[1], p.up[2]); flyTo(p.p[0], p.p[1], p.p[2], 0, secs, poseQ); };
   const runBench = async (secs = 11) => {
     const stat = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? { avg: +(s.reduce((x, y) => x + y, 0) / s.length).toFixed(2), p99: +s[Math.floor(s.length * 0.99)].toFixed(2), max: +s[s.length - 1].toFixed(2), n: s.length } : null; };
     setPose(0); state.snap = 1; await new Promise((r) => setTimeout(r, 1500));
     bench = { frame: [], gpu: [] };
     const legs = [];
-    for (let i = 1; i <= POSES.length; i++) { const p = POSES[i % POSES.length], g0 = bench.gpu.length; flyTo(p.p[0], p.p[1], p.p[2], 0, secs); await new Promise((r) => setTimeout(r, secs * 1000 + 300)); const g = bench.gpu.slice(g0); legs.push({ to: p.name, avg: +(g.reduce((x, y) => x + y, 0) / Math.max(1, g.length)).toFixed(2), max: +Math.max(0, ...g).toFixed(2), over: g.filter((x) => x > 8.3).length }); }
+    for (let i = 1; i <= POSES.length; i++) { const p = POSES[i % POSES.length], g0 = bench.gpu.length; flyPose(i % POSES.length, secs); await new Promise((r) => setTimeout(r, secs * 1000 + 300)); const g = bench.gpu.slice(g0); legs.push({ to: p.name, avg: +(g.reduce((x, y) => x + y, 0) / Math.max(1, g.length)).toFixed(2), max: +Math.max(0, ...g).toFixed(2), over: g.filter((x) => x > 8.3).length }); }
     const b = bench; bench = null;
     const budget = period * 1000;
     return { frameMs: stat(b.frame), gpuMs: stat(b.gpu), late: b.frame.filter((x) => x > budget * 1.6).length, gpuOver: b.gpu.filter((x) => x > 8.3).length, legs, size: [W, H], scale: resScale, level: LEVEL, mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null };
   };
-  window.SH = { deep, bodies, pick, target, labels, bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
+  window.SH = { flyPose, deep, bodies, pick, target, labels, bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
 }
 main().catch((e) => { console.error(e); body.className = 'l e'; $('s').textContent = (e.cause ? '' : 'Failed to start: ') + e.message; });

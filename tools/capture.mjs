@@ -52,9 +52,11 @@ try {
     await page.evaluate(() => { SH.setPose(0); SH.settle(); });
     await page.waitForTimeout(1500);
     for (let leg = 1; leg <= names.length; leg++) {
-      await page.evaluate((i) => { const p = SH.POSES[i % SH.POSES.length]; SH.flyTo(p.p[0], p.p[1], p.p[2], 0, 11); }, leg);
-      for (const [k, at] of [[0, 3200], [1, 3600]]) {
-        await page.waitForTimeout(at);
+      await page.evaluate((i) => SH.flyPose(i % SH.POSES.length, 11), leg);
+      const t0 = Date.now();
+      // two moments in each leg (the flight eases in and out, so the middle is where things move)
+      for (const [k, at] of [[0, 4700], [1, 7600]]) {
+        await page.waitForTimeout(Math.max(0, t0 + at - Date.now()));
         for (const half of ['a', 'b']) {
           const f0 = await page.evaluate(() => SH.frames());
           if (half === 'b') await page.waitForFunction((f) => SH.frames() >= f + 3, f0, { timeout: 60000 });
@@ -63,7 +65,7 @@ try {
           report.fly.push({ file, toward: names[leg % names.length] });
         }
       }
-      await page.waitForTimeout(11000 - 6800 + 400);
+      await page.waitForTimeout(Math.max(0, t0 + 11400 - Date.now()));
     }
     console.log(`fly-through: ${report.fly.length} frames`);
   }

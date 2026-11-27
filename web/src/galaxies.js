@@ -46,40 +46,50 @@ const OLD = vec3f(1.0, 0.80, 0.56);
 const YOUNG = vec3f(0.60, 0.76, 1.0);
 const HII = vec3f(1.0, 0.28, 0.42);
 // emission (rgb, luminosity per unit volume for a galaxy of unit radius and unit luminosity) and dust (a) at q.
+// Fractal noise for structure, five octaves from about a thirteenth of the radius down. Each octave is used only
+// where it can be seen for what it is: not so close to the camera (t, in radii) that one cell spans the sky, and not
+// so far that a cell is smaller than a pixel (foot: the size of a pixel there, in radii). Each is rotated against
+// the last so the lattices never line up. Returns the first three octaves and the weighted sum, all around 0.5.
+fn galNoise(q: vec3f, sd: f32, t: f32, foot: f32) -> vec4f {
+  var p = vec3f(q.x * 0.8 - q.y * 0.6, q.x * 0.6 + q.y * 0.8, q.z * 2.2) * 13.0 + sd;
+  var c = 1.0 / 13.0; var amp = 0.5; var sum = 0.0;
+  var o = vec3f(0.5);
+  for (var i = 0; i < 5; i++) {
+    let w = smoothstep(c * 1.2, c * 3.5, t) * (1.0 - smoothstep(c * 0.25, c * 0.6, foot));
+    if (w > 0.0) { let n = (vnoise(p) - 0.5) * w; sum += amp * n; if (i < 3) { o[i] = 0.5 + n; } }
+    p = vec3f(p.x * 0.54 + p.y * 0.84, -p.x * 0.84 + p.y * 0.54, p.z) * 2.2 + 9.1; c /= 2.2; amp *= 0.82;
+  }
+  return vec4f(o, 0.5 + sum);
+}
 // detail 0 skips the noise (used by the impostor's bulge-only path and by low settings).
-fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32) -> vec4f {
+fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32, t: f32, foot: f32) -> vec4f {
   let r2 = dot(q.xy, q.xy); let r = sqrt(r2);
   let s2 = r2 + q.z * q.z / (p.qz * p.qz);
   let bul = p.fb / (9.8696 * p.qz * p.rb * p.rb * p.rb) * pow(1.0 + s2 / (p.rb * p.rb), -2.0) * (1.0 - smoothstep(1.0, 1.7, sqrt(s2)));
   if (p.fb >= 0.999) { return vec4f(OLD * bul, 0.0); }
   let az = abs(q.z);
-  let disc = (1.0 - p.fb) / (12.566 * p.h * p.h * p.hz) * exp(-r / p.h - az / p.hz) * (1.0 - smoothstep(0.85, 1.65, r));
+  let disc = (1.0 - p.fb) / (12.566 * p.h * p.h * p.hz) * exp(-r / p.h - az / p.hz) * (1.0 - smoothstep(0.75, 1.65, r));
   if (disc < 1e-4 && bul < 1e-4) { return vec4f(0.0); }
   let th = atan2(q.y, q.x) * p.wind;
-  var n1 = 0.5; var n2 = 0.0; var wob = 0.0;
-  // real arms are not ruled spirals: a slow wander in phase bends, forks and breaks them
-  if (detail > 0.0) { wob = (vnoise(vec3f(q.xy * 2.7, 0.37) + sd * 1.3) - 0.5) * 3.0 * detail; }
+  var n1 = 0.5; var n2 = 0.5; var nf = 0.5; var wob = 0.0;
+  // real arms are not ruled spirals: a slow wander in phase bends, forks and breaks them (two lattices, turned
+  // against each other, so the wander has no corners)
+  if (detail > 0.0) { wob = (vnoise(vec3f(q.xy * 2.7, 0.37) + sd * 1.3) + vnoise(vec3f(q.x * 1.9 + q.y * 1.6, q.y * 1.9 - q.x * 1.6, 0.81) + sd * 0.7) - 1.0) * 2.1 * detail; }
   let ph = p.arms * (th - log(max(r, 0.02)) * p.pitch) + p.phase + wob;
   let c = 0.5 + 0.5 * cos(ph);
   let c2 = 0.5 + 0.5 * cos(2.0 * ph + 1.3 - wob * 1.6);          // spurs and secondary arms at twice the count
-  let inner = smoothstep(0.04, 0.22, r);
+  let inner = smoothstep(0.04, 0.22, r) * (1.0 - 0.6 * smoothstep(0.8, 1.4, r));     // arms calm down toward the rim
   let c4 = c * c * c * c;
   let arm = c4 * 2.85 + c2 * c2 * 0.59;                         // main arms + spurs; mean 1 around the circle
-  if (detail > 0.0) {
-    // each octave is rotated against the last, so the noise lattice never lines up into a visible weave
-    let w = vec3f(q.x * 0.8 - q.y * 0.6, q.x * 0.6 + q.y * 0.8, q.z) * vec3f(13.0, 13.0, 36.0) + sd;
-    let w2 = vec3f(w.x * 0.54 + w.y * 0.84, -w.x * 0.84 + w.y * 0.54, w.z) * 2.3 + 9.1;
-    n1 = vnoise(w) * 0.6 + vnoise(w2) * 0.4;
-    n2 = vnoise(vec3f(w2.x * 0.7 - w2.y * 0.71, w2.x * 0.71 + w2.y * 0.7, w2.z) * 1.9 + 31.7);
-  }
+  if (detail > 0.0) { let n = galNoise(q, sd, t, foot); n1 = 0.5 + (n.x - 0.5) * 0.6 + (n.y - 0.5) * 0.4; n2 = n.z; nf = n.w; }
   let clumps = mix(1.0, 0.25 + 1.5 * n1, p.clump * (0.5 + 0.5 * detail));
   // star formation is patchy along the arms: they break into bright stretches and gaps
   let knot = mix(1.0, 0.3 + 1.4 * smoothstep(0.3, 0.7, n1), detail);
   // ... and the whole disc is mottled with star clouds a few hundred parsecs across
-  let discE = disc * mix(1.0, arm * knot, p.armC * inner) * clumps * mix(1.0, 0.5 + n2, detail);
+  let discE = disc * mix(1.0, arm * knot, p.armC * inner) * clumps * mix(1.0, clamp(0.2 + 1.6 * nf, 0.25, 1.9), detail);
   let fy = clamp(c4 * p.armC * inner * 0.95 + p.clump * 0.45 - 0.1, 0.0, 1.0);
   var col = OLD * bul + discE * mix(OLD * 0.95, YOUNG, fy);
-  col += HII * disc * smoothstep(0.66, 0.92, n2) * arm * inner * (p.armC + p.clump * 0.6) * 1.1 * detail;
+  col += HII * disc * smoothstep(0.62, 0.8, n2) * arm * inner * (p.armC + p.clump * 0.6) * 1.5 * detail;
   if (p.bar > 0.0) {
     let a = p.phase * 0.5; let xb = vec2f(q.x * cos(a) + q.y * sin(a), -q.x * sin(a) + q.y * cos(a));
     col += OLD * p.bar * (1.0 - p.fb) * 2.6 * exp(-(xb.x * xb.x) / 0.045 - (xb.y * xb.y) / 0.0035 - q.z * q.z / 0.003);
@@ -87,10 +97,9 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32) -> vec4f {
   let cd = 0.5 + 0.5 * cos(ph + 0.85);
   // dust: a thin, patchy layer. Its mid-plane wanders and its density comes in clouds, so that seen edge-on (or from
   // inside) the lane breaks up into rifts and windows instead of one ruled line.
-  let nd = n1 * 0.55 + n2 * 0.45;
-  let zd = abs(q.z + (n1 - 0.5) * p.hz * 1.1 * detail);
-  let cloud = mix(1.0, 3.6 * smoothstep(0.36, 0.72, nd), detail);
-  let dust = (1.0 - p.fb) * exp(-r / (p.h * 1.5) - zd / (p.hz * 0.4)) * (0.2 + 1.6 * cd * cd * inner * p.armC + p.clump) * cloud * (1.0 - smoothstep(1.0, 1.5, r));
+  let zd = abs(q.z + (n1 - 0.5) * p.hz * 1.3 * detail);
+  let cloud = mix(1.0, 4.0 * smoothstep(0.45, 0.66, nf), detail);
+  let dust = (1.0 - p.fb) * exp(-r / (p.h * 1.5) - zd / (p.hz * 0.5)) * (0.2 + 2.4 * cd * cd * cd * cd * inner * p.armC + p.clump) * cloud * (1.0 - smoothstep(1.0, 1.5, r));
   return vec4f(col, dust);
 }
 `;
@@ -105,7 +114,7 @@ ${GLOBALS}
 ${NOISE_STUB}
 ${MODEL}
 struct Vol { c: vec3f, R: f32, ax: vec3f, lum: f32, ay: vec3f, flat: f32, n: vec3f, weight: f32, id: vec4u }
-struct Vols { v: array<Vol, 4>, steps: f32, count: f32, kappa: f32, pad: f32 }
+struct Vols { v: array<Vol, 4>, steps: f32, count: f32, kappa: f32, pix: f32 }
 @group(0) @binding(1) var<uniform> V: Vols;
 struct Fill { cell: vec3i, n: i32, frac: vec3f, size: f32, sun: vec3f, mag: f32, per: u32, level: u32, expect: f32, gain: f32, host: u32, isMW: u32, p0: u32, p1: u32 }
 @group(1) @binding(0) var<uniform> F: Fill;
@@ -138,7 +147,7 @@ fn bvColour(bv: f32) -> vec3f {
   let v = V.v[F.host];
   let P = galParams(v.id.x, v.flat, v.id.y);
   let w = rel - v.c;
-  let e = galEmit(vec3f(dot(w, v.ax), dot(w, v.ay), dot(w, v.n)) / v.R, P, 0.0, 0.0);
+  let e = galEmit(vec3f(dot(w, v.ax), dot(w, v.ay), dot(w, v.n)) / v.R, P, 0.0, 0.0, 0.0, 1.0);
   let rho = dot(e.rgb, vec3f(0.33)) * v.lum / v.R / 0.02296;
   if (u2.x >= F.expect * rho) { return o; }
   var absmag = F.mag + (u2.y - 0.5) * 3.0;
@@ -208,7 +217,7 @@ struct VO {
   let peak = min(ep / (6.2831853 * sigma * sigma), 40.0);
   let p = project(rel);
     // small impostors are lifted like the points they grow out of (L.gain), large ones keep their true surface brightness
-  let boost = mix(L.gain, 1.0, smoothstep(3.0, 40.0, sizePx));
+  let boost = mix(min(L.gain, 5.0), 1.0, smoothstep(3.0, 40.0, sizePx));
   let omega = OMEGA;
   if (G.exposure * G.diffuse * boost * lum / (g.x * g.x) * omega * 30.0 < 0.002) { w = 0.0; }
   if ((peak < 0.0035 && w <= 0.0) || p.z > 1.0) { o.pos = vec4f(0.0, 0.0, 2.0, 1.0); return o; }
@@ -253,7 +262,7 @@ struct VO {
       let ax = normalize(cross(n, select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), abs(n.x) > 0.7)));
       let ay = cross(n, ax);
       let q = vec3f(dot(hit, ax), dot(hit, ay), 0.0);
-      let v = galEmit(q, P, f32(i.id.y & 1023u), select(0.0, 1.0, i.prm.w > 40.0));
+      let v = galEmit(q, P, f32(i.id.y & 1023u), select(0.0, 1.0, i.prm.w > 40.0), 10.0, 1.0 / (i.prm.w * G.pxScale));
       // the bulge's share of v, exactly as galEmit adds it (outer cut included: without it the difference goes
       // negative past r = 1 and the disc ends in a hard edge)
       let rq = dot(q.xy, q.xy);
@@ -270,14 +279,14 @@ ${GLOBALS}
 ${NOISE_TEX}
 ${MODEL}
 struct Vol { c: vec3f, R: f32, ax: vec3f, lum: f32, ay: vec3f, flat: f32, n: vec3f, weight: f32, id: vec4u }
-struct Vols { v: array<Vol, 4>, steps: f32, count: f32, kappa: f32, pad: f32 }
+struct Vols { v: array<Vol, 4>, steps: f32, count: f32, kappa: f32, pix: f32 }
 @group(0) @binding(1) var<uniform> V: Vols;
 struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f }
 @vertex fn vs(@builtin(vertex_index) i: u32) -> VO {
   var o: VO; let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u)) * 2.0 - 1.0;
   o.pos = vec4f(p, 0.0, 1.0); o.ndc = p; return o;
 }
-fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.06711056, 0.00583715)))); }
+fn ign(p: vec2f) -> f32 { var q = fract(vec3f(p.xyx) * 0.1031 + fract(G.time * 7.31)); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 @fragment fn fs(i: VO) -> @location(0) vec4f {
   let d = normalize(G.right * i.ndc.x * G.aspect / G.focal + G.up * i.ndc.y / G.focal + G.fwd);
   let omega = OMEGA;
@@ -316,10 +325,10 @@ fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.0671105
       let um = pow((s + jit) / N, pw);
       let tn = t0 + (t1 - t0) * u1; let t = t0 + (t1 - t0) * um; let dt = tn - prev; prev = tn;
       // no fine structure right around the camera: there it would be a few huge blotches across the whole sky
-      var e = galEmit(ro + rd * t, P, sd, smoothstep(0.02, 0.12, t));
+      var e = galEmit(ro + rd * t, P, sd, 1.0, t, t * V.pix);
       // the camera's own neighbourhood is left to individual stars (catalogued or fill): the model supplies only
       // the light from farther off, which keeps the sky dark away from the plane
-      e = vec4f(e.rgb * smoothstep(0.0, 0.11, t), e.a * smoothstep(0.0, 0.03, t));
+      e = vec4f(e.rgb * smoothstep(0.0, 0.05, t), e.a);
       let a = exp(-e.a * V.kappa * dt);
       acc += tr * e.rgb * dt * (1.0 + a) * 0.5;
       tr *= a;
@@ -433,7 +442,7 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
       vu[b + 16] = (u[o + 3] >>> 8) & 255; vu[b + 17] = u[o + 9];
       nVol++;
     }
-    vf[80] = quality.volSteps; vf[81] = nVol; vf[82] = 34;
+    vf[80] = quality.volSteps; vf[81] = nVol; vf[82] = 34; vf[83] = 2 * Math.tan(cam.fov / 2) / (H * quality.volScale);   // angle of one pixel of the volume target
     queue.writeBuffer(volBuf, 0, volData);
     // fill stars: hosted by the looming galaxy the camera is in or close to
     let host = -1;

@@ -16,6 +16,12 @@ const SHADER = /*wgsl*/`
 ${GLOBALS}
 @group(0) @binding(1) var earthTex: texture_2d<f32>;
 @group(0) @binding(2) var earthSmp: sampler;
+@group(0) @binding(3) var noiseTex: texture_3d<f32>;
+@group(0) @binding(4) var noiseSmp: sampler;
+fn vnoise(p: vec3f) -> f32 {
+  let i = floor(p); var f = p - i; f = f * f * (3.0 - 2.0 * f);
+  return textureSampleLevel(noiseTex, noiseSmp, (i + f + 0.5) / 64.0, 0.0).r;
+}
 struct VO {
   @builtin(position) pos: vec4f, @location(0) uv: vec2f,
   @location(1) @interpolate(flat) c: vec4f,        // centre in body radii (camera at the origin), kind
@@ -73,19 +79,29 @@ fn hash1(x: f32) -> f32 { return fract(sin(x * 127.1) * 43758.5453); }
         // the Sun: limb-darkened and far above white, so the bloom gives it its glare
         body = i.col.rgb * (0.4 + 0.6 * mu) * mix(vec3f(1.0, 0.55, 0.25), vec3f(1.0), mu) * 14.0;
       } else if (kind == 1.0) {
-        let lon = atan2(n.y, n.x) - i.sun.w;
-        let uv = vec2f(fract(lon / 6.2831853 + 0.5), 0.5 - asin(clamp(n.z, -1.0, 1.0)) / 3.1415927);
+        // into the Earth's own turning frame (prime meridian on +x), then longitude and latitude
+        let cs = cos(i.sun.w); let sn = sin(i.sun.w);
+        let e = vec3f(n.x * cs + n.y * sn, n.y * cs - n.x * sn, n.z);
+        let uv = vec2f(fract(atan2(e.y, e.x) / 6.2831853 + 0.5), 0.5 - asin(clamp(e.z, -1.0, 1.0)) / 3.1415927);
         // the wrap in longitude would make the derivative jump: give the gradients explicitly from the pixel size
         let px = 1.0 / max(i.col.a * 3.14159, 1.0);
-        var t = textureSampleGrad(earthTex, earthSmp, uv, vec2f(px * 0.5, 0.0), vec2f(0.0, px)).rgb;
+        let t = textureSampleGrad(earthTex, earthSmp, uv, vec2f(px * 0.5, 0.0), vec2f(0.0, px)).rgb;
+        // Weather: the Blue Marble is a cloud-free mosaic, so the clouds are a model. Fractal noise on the sphere,
+        // swirled, and thickest along the equator and the two storm belts.
+        var cp = e * 2.6; cp += (vec3f(vnoise(cp * 0.9 + 4.0), vnoise(cp.yzx * 0.9 + 9.0), vnoise(cp.zxy * 0.9)) - 0.5) * 1.6;
+        let cf = vnoise(cp) * 0.36 + vnoise(cp * 2.3 + 7.1) * 0.28 + vnoise(cp * 5.3 + 2.9) * 0.21 + (vnoise(cp * 12.1 + 5.5) * 0.15 - 0.075) * smoothstep(8.0, 60.0, i.col.a) + 0.075;
+        let belt = 0.05 * cos(e.z * 10.5) - 0.07 * smoothstep(0.1, 0.45, abs(abs(e.z) - 0.42)) + 0.05;
+        let cover = smoothstep(0.55, 0.68, cf + belt) * 0.9;
         let day = smoothstep(-0.08, 0.22, lit);
-        let water = smoothstep(0.02, 0.10, t.b - max(t.r, t.g));
+        let water = smoothstep(0.03, 0.12, t.b - max(t.r, t.g)) * (1.0 - cover);
         let hv = normalize(l - d);
-        let glint = pow(max(dot(n, hv), 0.0), 90.0) * water * 0.9;
-        // air: bluish scattering that thickens toward the limb, warming at the terminator
-        let air = pow(1.0 - mu, 4.0) * 0.6;
+        let glint = (pow(max(dot(n, hv), 0.0), 220.0) * 2.2 + pow(max(dot(n, hv), 0.0), 24.0) * 0.22) * water;
+        // air: bluish scattering over everything, thickening toward the limb and warming at the terminator
+        let air = pow(1.0 - mu, 4.0);
         let sky = mix(vec3f(0.25, 0.48, 1.0), vec3f(1.0, 0.45, 0.2), smoothstep(0.25, -0.05, lit) * smoothstep(-0.2, 0.0, lit));
-        body = (t * 1.25 * max(lit, 0.0) + vec3f(glint)) * day + sky * air * 0.9 * smoothstep(-0.12, 0.15, lit);
+        let ground = mix(t * 1.12 * (1.0 - 0.4 * cover), vec3f(0.93, 0.95, 1.0), cover * 0.92);
+        body = (ground * max(lit, 0.0) + vec3f(1.0, 0.95, 0.85) * glint) * day;
+        body = mix(body, sky * max(lit, 0.0) * 0.9, 0.09) + sky * air * 0.55 * smoothstep(-0.12, 0.15, lit);
       } else {
         var alb = i.col.rgb;
         if (kind == 3.0) {
@@ -101,7 +117,7 @@ fn hash1(x: f32) -> f32 { return fract(sin(x * 127.1) * 43758.5453); }
       // glow of the atmosphere just outside the limb (scale height stretched so it is a visible thread)
       let hgt = sqrt(p2) - 1.0;
       let nl = dot(normalize(-p), l);
-      body = vec3f(0.3, 0.55, 1.0) * exp(-hgt / 0.012) * 0.8 * smoothstep(-0.25, 0.25, nl);
+      body = (vec3f(0.35, 0.6, 1.0) * exp(-hgt / 0.0045) * 0.9 + vec3f(0.2, 0.4, 1.0) * exp(-hgt / 0.016) * 0.3) * smoothstep(-0.25, 0.25, nl);
     } else if (kind == 2.0 && b > 0.0) {
       let hgt = sqrt(p2) - 1.0;
       body = i.col.rgb * (0.9 * exp(-hgt / 0.06) + 0.12 / (1.0 + hgt * hgt * 6.0)) * 1.5;   // inner corona
@@ -140,7 +156,7 @@ struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
 @vertex fn vs(@builtin(vertex_index) i: u32) -> VO { var o: VO; let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u)); o.pos = vec4f(p * 2.0 - 1.0, 0.0, 1.0); o.uv = vec2f(p.x, 1.0 - p.y); return o; }
 @fragment fn fs(i: VO) -> @location(0) vec4f { return textureSampleLevel(src, smp, i.uv, 0.0); }`;
 
-export function initBodies(gpu, globalsBuf, base, jd, texWidth = 4096) {
+export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
   const { device, queue } = gpu;
   const NB = PLANETS.length + 1, F = 20;
   // heliocentric positions for the date (fixed for the session: the planets move far too slowly to see)
@@ -154,7 +170,8 @@ export function initBodies(gpu, globalsBuf, base, jd, texWidth = 4096) {
   const module = device.createShaderModule({ code: SHADER });
   const layout = device.createBindGroupLayout({ entries: [
     { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} },
-    { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: {} }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} }] });
+    { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: {} }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: '3d' } }, { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: {} }] });
   const attrs = [0, 1, 2, 3, 4].map((k) => ({ shaderLocation: k, offset: k * 16, format: 'float32x4' }));
   // bodies are opaque where they are solid: they hide the stars behind them
   const pipeline = device.createRenderPipeline({
@@ -167,9 +184,9 @@ export function initBodies(gpu, globalsBuf, base, jd, texWidth = 4096) {
   // until the Blue Marble arrives the Earth is a plain blue ball
   let tex = device.createTexture({ size: [1, 1], format: 'rgba8unorm-srgb', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
   queue.writeTexture({ texture: tex }, new Uint8Array([28, 60, 120, 255]), {}, [1, 1]);
-  const mkBind = () => device.createBindGroup({ layout, entries: [{ binding: 0, resource: { buffer: globalsBuf } }, { binding: 1, resource: tex.createView() }, { binding: 2, resource: smp }] });
+  const mkBind = () => device.createBindGroup({ layout, entries: [{ binding: 0, resource: { buffer: globalsBuf } }, { binding: 1, resource: tex.createView() }, { binding: 2, resource: smp }, { binding: 3, resource: noise.view }, { binding: 4, resource: noise.sampler }] });
   let bind = mkBind();
-  fetch(base + 'earth.jpg').then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => createImageBitmap(b, { colorSpaceConversion: 'none', resizeWidth: texWidth, resizeHeight: texWidth / 2, resizeQuality: 'high' })).then((img) => {
+  fetch(base + 'earth.jpg').then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => createImageBitmap(b, texWidth ? { colorSpaceConversion: 'none', resizeWidth: texWidth, resizeHeight: texWidth / 2, resizeQuality: 'high' } : { colorSpaceConversion: 'none' })).then((img) => {
     const w = img.width, h = img.height, levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
     const t = device.createTexture({ size: [w, h], mipLevelCount: levels, format: 'rgba8unorm-srgb', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
     queue.copyExternalImageToTexture({ source: img }, { texture: t }, [w, h]);
@@ -247,15 +264,16 @@ export function initBodies(gpu, globalsBuf, base, jd, texWidth = 4096) {
   // Where the flight begins: a few hundred kilometres up over whichever well-known stretch of coast is in the
   // best daylight right now, looking across it to the Earth's limb with the Sun off to one side.
   // Returns position, look-at point and up vector.
-  const SITES = [[12, 41], [33, 26], [78, 18], [138, 35], [125, -22], [-114, 29], [-80, 24], [-70, -42], [22, -30], [-43, -18], [-5, 36], [103, 8]];   // east longitude, latitude
-  function launch(altKm = 780) {
+  const SITES = [[12, 41], [-80, 24], [103, 8], [138, 35], [-5, 36], [33, 26], [78, 18], [-114, 29], [150, -30], [-43, -18], [-70, -42], [22, -30]];   // east longitude, latitude, in order of preference
+  function launch(altKm = 1400) {
     const e = EARTH * 3, ex = pos[e], ey = pos[e + 1], ez = pos[e + 2], ds = Math.hypot(ex, ey, ez);
     const u = [-ex / ds, -ey / ds, -ez / ds];                              // to the Sun
     let S = null, best = -2;
     for (const [lon, lat] of SITES) {
       const a = spin + lon * Math.PI / 180, b = lat * Math.PI / 180, v = [Math.cos(b) * Math.cos(a), Math.cos(b) * Math.sin(a), Math.sin(b)];
       const lit = v[0] * u[0] + v[1] * u[1] + v[2] * u[2];
-      if (lit > best) { best = lit; S = v; }
+      // the first site in good daylight wins; failing that, the best lit
+      if (best < 0.6 && lit > best) { best = lit; S = v; }
     }
     const unit = (v) => { const n = Math.hypot(...v); return v.map((x) => x / n); };
     const t = unit([S[1] * u[2] - S[2] * u[1], S[2] * u[0] - S[0] * u[2], S[0] * u[1] - S[1] * u[0]]);   // along the ground, square to the Sun
@@ -264,14 +282,20 @@ export function initBodies(gpu, globalsBuf, base, jd, texWidth = 4096) {
     const R = radius[EARTH], d = R + altKm * KM_PC;
     const p = [ex + r[0] * d, ey + r[1] * d, ez + r[2] * d];
     const k = S[0] * r[0] + S[1] * r[1] + S[2] * r[2], f = unit([S[0] - r[0] * k, S[1] - r[1] * k, S[2] - r[2] * k]);
-    const c = Math.cos(0.36), s = Math.sin(0.36);
+    const c = Math.cos(0.52), s = Math.sin(0.52);
     return { p, at: [p[0] + (f[0] * c - r[0] * s) * R, p[1] + (f[1] * c - r[1] * s) * R, p[2] + (f[2] * c - r[2] * s) * R], up: r };
   }
-  // The night sky from just above the Earth's dark side, looking straight out with north up
+  // The night sky from above the Earth's dark side: looking at whichever showpiece of the sky is highest at local
+  // midnight today (Orion, the galactic centre, the Southern Cross or Cygnus), north up
   function night() {
-    const e = EARTH * 3, ds = Math.hypot(pos[e], pos[e + 1], pos[e + 2]), k = 1 + radius[EARTH] * 1.6 / ds;
-    const p = [pos[e] * k, pos[e + 1] * k, pos[e + 2] * k];
-    return { p, at: [p[0] * 2, p[1] * 2, p[2] * 2], up: [0, 0, 1] };
+    const e = EARTH * 3, ds = Math.hypot(pos[e], pos[e + 1], pos[e + 2]), away = [pos[e] / ds, pos[e + 1] / ds, pos[e + 2] / ds];
+    let v = away, best = -2;
+    for (const [ra, dec] of [[84, -2], [266, -29], [187, -60], [305, 40]]) {
+      const a = ra * Math.PI / 180, b = dec * Math.PI / 180, c = [Math.cos(b) * Math.cos(a), Math.cos(b) * Math.sin(a), Math.sin(b)], k = c[0] * away[0] + c[1] * away[1] + c[2] * away[2];
+      if (k > best) { best = k; v = c; }
+    }
+    const R = radius[EARTH] * 1.6, p = [pos[e] + v[0] * R, pos[e + 1] + v[1] * R, pos[e + 2] + v[2] * R];
+    return { p, at: [p[0] + v[0], p[1] + v[1], p[2] + v[2]], up: [0, 0, 1] };
   }
   return { update, draw, near, launch, night, hides, names, count: NB, pos: (i, a) => pos[i * 3 + a], radius: (i) => radius[i], AU: 1 / PC_AU };
 }
