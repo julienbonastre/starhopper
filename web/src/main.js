@@ -37,7 +37,9 @@ async function main() {
   });
   const globals = new ArrayBuffer(GLOBALS_SIZE), gf = new Float32Array(globals), gi = new Int32Array(globals);
   const globalsBuf = device.createBuffer({ size: GLOBALS_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-  const base = 'data/';
+  const base = DATA_BASE;
+  // a pull request's preview build says so, so that nobody takes it for the live site
+  if (PREVIEW) { const b = document.createElement('div'); b.textContent = 'Preview of pull request #' + PREVIEW; b.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:9;padding:4px 9px;border-radius:999px;background:#c8102e;color:#fff;font:600 11px system-ui;letter-spacing:.04em;pointer-events:none'; document.body.append(b); }
   say('Reading the star and galaxy indexes', 0.3);
   const [stars, galPts, gal] = await Promise.all([
     initPoints(gpu, globalsBuf, base + 'stars/', quality, { budget: quality.starBudget, track: true, magOff: 20, sigma0: 0.62 }),

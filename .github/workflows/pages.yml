@@ -1,9 +1,15 @@
 name: Build and deploy
 
+# One Pages site holds everything: main at the root, and every open pull request from this repository at
+# /pr/<number>/. Only a run on main may deploy, so a pull request's own run tests it and then asks for a run on
+# main, which rebuilds the whole site with the previews of whatever is open at that moment. A preview appears a few
+# minutes after each push and is gone after the first rebuild once its pull request is closed.
+
 on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +20,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  # ---- a pull request: build and test it
+  check:
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,15 +38,97 @@ jobs:
         with:
           path: .cache
           key: catalogues-${{ hashFiles('pipeline/*.mjs') }}
+          restore-keys: catalogues-
       - run: npm run data
       - run: npm test
       - run: npm run build
+
+  # ---- a pull request from this repository: ask main to rebuild the site, and say where the preview will be.
+  # (A fork's token cannot do either, so forks get no preview: their code never runs in a deploying workflow.)
+  preview:
+    if: >-
+      always() && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && (github.event.action == 'closed' || needs.check.result == 'success')
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - run: gh workflow run pages.yml --repo "$REPO" --ref main
+      - if: github.event.action != 'closed'
+        run: |
+          url="https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO#*/}/pr/${PR}/"
+          body="<!-- preview -->
+          **Preview:** ${url}
+
+          Rebuilt a few minutes after each push to this pull request, and removed once it is merged or closed. The page carries a red \"Preview\" badge; the live site is unaffected."
+          id=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate --jq '.[] | select(.body | startswith("<!-- preview -->")) | .id' | head -1)
+          if [ -n "$id" ]; then gh api -X PATCH "repos/${REPO}/issues/comments/${id}" -f body="$body" > /dev/null
+          else gh api -X POST "repos/${REPO}/issues/${PR}/comments" -f body="$body" > /dev/null; fi
+
+  # ---- main: build the site, add the open pull requests' previews, deploy
+  build:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: catalogues-${{ hashFiles('pipeline/*.mjs') }}
+          restore-keys: catalogues-
+      - run: npm run data
+      - run: npm test
+      - run: npm run build
+      - name: Previews of open pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          # A preview that does not touch the data pipeline is just its page, reading the live site's data; one that
+          # does bakes and carries its own. A preview that fails to build is left out and never blocks the deploy.
+          one() {
+            n=$1; sha=$2; dir="$RUNNER_TEMP/pr-$n"
+            git fetch -q origin "$sha" && git worktree add -q --detach "$dir" "$sha" && cd "$dir" || return 1
+            grep -q DATA_BASE web/build.mjs || { echo "::notice::PR $n predates previews (rebase it onto main)"; return 0; }
+            npm ci --silent || return 1
+            if git diff --quiet "$GITHUB_SHA...$sha" -- pipeline/; then
+              OUT="$GITHUB_WORKSPACE/dist/pr/$n" PREVIEW="$n" DATA_BASE=../../data/ node web/build.mjs
+            else
+              ln -s "$GITHUB_WORKSPACE/.cache" .cache && npm run data && OUT="$GITHUB_WORKSPACE/dist/pr/$n" PREVIEW="$n" node web/build.mjs
+            fi
+          }
+          gh pr list --state open --limit 20 --json number,headRefOid,isCrossRepository \
+            --jq '.[] | select(.isCrossRepository | not) | "\(.number) \(.headRefOid)"' > "$RUNNER_TEMP/prs"
+          while read -r n sha; do
+            echo "::group::PR $n at $sha"
+            ( one "$n" "$sha" ) || { echo "::warning::the preview of PR $n did not build"; rm -rf "$GITHUB_WORKSPACE/dist/pr/$n"; }
+            echo "::endgroup::"
+          done < "$RUNNER_TEMP/prs"
+          du -sh dist
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
   deploy:
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     permissions:
