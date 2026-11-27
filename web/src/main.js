@@ -113,7 +113,7 @@ async function main() {
   labels.occluder(bodies.hides);
   place(0, bodies.night());
   // the picture comes first: figures and names are off until asked for
-  const show = { lines: false, names: false, proc: true, sound: true, exo: false };
+  const show = { lines: false, names: false, proc: true, sound: true, exo: false, trails: true };
   const labelLimit = { star: 0, con: 0, body: 0, deep: 0, galaxy: 0, target: 99 };
   const kindGain = { star: 1, con: 1, body: 1, deep: 1, galaxy: 1, target: 1 };
   const tgtLabel = labels.add('', 'target', 0, 0, 0, NaN, 0, 0, -100);   // the target marker: hidden (maxDist 0) until something is picked
@@ -158,6 +158,7 @@ async function main() {
     else if (code === 'KeyN') { show.names = !show.names; syncToggles(); }
     else if (code === 'KeyX') { show.exo = !show.exo; syncToggles(); flash(show.exo ? markers.count.toLocaleString() + ' stars with known planets' : 'Exoplanet hosts hidden'); }
     else if (code === 'KeyM') { show.sound = setSound(!show.sound); syncToggles(); keep('starhopperSound', show.sound ? 1 : 0); flash(show.sound ? 'Sound on' : 'Sound off'); }
+    else if (code === 'KeyV') { show.trails = !show.trails; flash(show.trails ? 'Speed streaks on' : 'Speed streaks off'); }
     else if (code === 'KeyP') { show.proc = !show.proc; syncToggles(); flash(show.proc ? 'Procedural fill on' : 'Measured data only'); }
     else if (/^Digit[1-8]$/.test(code)) { freshNight(); setPose(+code[5] - 1); state.snap = 1; flash(POSES[+code[5] - 1].name); }
     else if (code === 'Unlocked' && !params.has('auto')) { body.classList.remove('fly'); if (flight.wheel) flight.thr = 0; }   // the menu is a pause: a scrolled throttle is let go
@@ -311,7 +312,9 @@ async function main() {
     const el = clockAt ? (now - clockAt) / 1000 : 0; clockAt = now;
     if (rateI === PAUSE || state.frozen) return;
     simJd += (rateI === 5 ? el : Math.min(el, 1)) * RATES[rateI] / 86400;
+    const cx = cam.p[0], cy = cam.p[1], cz = cam.p[2];
     bodies.setTime(simJd); nightStale = true;
+    rode[0] += cam.p[0] - cx; rode[1] += cam.p[1] - cy; rode[2] += cam.p[2] - cz;   // carried by a planet: not the camera's own travel
     if (!flight.goto) going = null;
     for (let i = 1; i < bodies.count; i++) {
       const x = bodies.pos(i, 0), y = bodies.pos(i, 1), z = bodies.pos(i, 2), r = bodyRow[i];
@@ -380,6 +383,7 @@ async function main() {
   const dts = new Float32Array(128), dtSort = new Float32Array(128);
   let busy = false, exoFade = 0, conFade = 0, nameFade = 0, labelT = 1, pointGain = 1, procFade = 1;
   let starCtx = 1;
+  const trail = new Float64Array(3), trailP = new Float64Array(3), rode = new Float64Array(3);   // streak vector, last camera place, how far a planet carried the camera this frame
   const DIFFUSE = 24;   // extended light is lifted relative to point sources, as dark-adapted eyes do
   const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   function frame(now) {
@@ -480,6 +484,15 @@ async function main() {
     gf[8] = cam.fwd[0]; gf[9] = cam.fwd[1]; gf[10] = cam.fwd[2]; gf[11] = exposure;
     gf[12] = W; gf[13] = H; gf[14] = time; gf[15] = pxScale;
     gf[16] = DIFFUSE; gf[17] = procFade;
+    // Streaks: the camera's travel over a thirtieth of a second, taken from where it actually went (so a fly-to
+    // counts), eased so it does not flicker, and held to half the distance of the nearest star so that only what
+    // is close streaks. A jump (a viewpoint, a restored place) is not travel.
+    {
+      const jump = state.snap || dt <= 0, k = 1 - Math.exp(-dt * 8), cap = 0.5 * Math.min(starCtx, flight.context);
+      for (let a = 0; a < 3; a++) { const v = jump ? 0 : (cam.p[a] - trailP[a] - rode[a]) / dt * 0.033; trail[a] = jump ? 0 : trail[a] + (v - trail[a]) * k; trailP[a] = cam.p[a]; rode[a] = 0; }
+      const n = Math.hypot(trail[0], trail[1], trail[2]), f = !show.trails || n < 1e-30 ? 0 : Math.min(1, cap / n);
+      gf[20] = trail[0] * f; gf[21] = trail[1] * f; gf[22] = trail[2] * f;
+    }
     queue.writeBuffer(globalsBuf, 0, globals);
 
     // constellation figures fade out as the Sun's neighbourhood is left behind

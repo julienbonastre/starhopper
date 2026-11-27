@@ -26,6 +26,7 @@ struct Globals {
   fwd: vec3f, exposure: f32,
   viewport: vec2f, time: f32, pxScale: f32,   // pxScale: device pixels per CSS pixel
   diffuse: f32, proc: f32, pad0: f32, pad1: f32,   // gain for extended light; 1 while procedural fill is shown
+  motion: vec3f, pad2: f32,      // how far the camera travelled while the shutter was open (parsecs): streaks the stars
 }
 @group(0) @binding(0) var<uniform> G: Globals;
 // camera-relative parsecs -> clip space (z is unused: nothing here needs a depth buffer)
@@ -35,4 +36,4 @@ fn project(rel: vec3f) -> vec4f {
   return vec4f(v.x * G.focal / G.aspect / v.z, v.y * G.focal / v.z, 0.5, 1.0);
 }
 `;
-export const GLOBALS_SIZE = 80;
+export const GLOBALS_SIZE = 96;
