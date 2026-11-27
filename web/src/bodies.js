@@ -42,9 +42,12 @@ struct VO {
   let s0 = 0.62 * G.pxScale;
   // A planet close by would outshine everything at the exposure the stars are drawn at, and then turn into a far
   // dimmer disc: the point is held to the glare of a very bright star, and hands over to the disc as that appears.
-  let sigma = min(max(s0, sqrt(e / (6.2831853 * 2.6))), 3.0 * G.pxScale);
-  let w = smoothstep(0.7, 2.0, rpx);
-  let peak = min(e / (6.2831853 * sigma * sigma), 2.6) * (1.0 - smoothstep(0.8, 3.0, rpx));
+  // As the disc comes up toward a pixel across the glare is drawn in to the disc's own size, so that a planet
+  // is never a blur wider than the shape it is about to become.
+  let res = smoothstep(0.25, 0.9, rpx);
+  let sigma = min(max(s0, sqrt(e / (6.2831853 * 2.6))), mix(3.0 * G.pxScale, max(s0, rpx * 0.7), res));
+  let w = smoothstep(0.45, 1.3, rpx);
+  let peak = min(e / (6.2831853 * sigma * sigma), mix(2.6, 1.3, res)) * (1.0 - smoothstep(1.0, 2.6, rpx));
   let p = project(c.xyz);
   o.c = c; o.col = vec4f(col.rgb, rpx); o.sun = sun; o.ring = ring; o.psf = vec4f(peak, sigma, ex.y, w); o.mapped = ex.z;
   if ((peak < 0.0035 && w <= 0.0) || (p.z > 1.0 && sinA < 0.2)) { o.pos = vec4f(0.0, 0.0, 2.0, 1.0); return o; }
@@ -146,7 +149,8 @@ fn hash1(x: f32) -> f32 { return fract(sin(x * 127.1) * 43758.5453); }
           body = i.col.rgb * mix(0.5, 1.0, sea) * rough * 1.5 * max(lit, 0.0) * (0.8 + 0.2 * mu);
         }
       }
-      cover = 1.0;
+      // soften the limb over a pixel, so that a small disc is round and not a few square steps
+      cover = clamp((1.0 - sqrt(p2)) * i.col.a + 0.5, 0.0, 1.0); body *= cover;
       // shadow of the rings is left out; the planet's shadow on the rings is not
     } else if (kind == 1.0 && b > 0.0) {
       // glow of the atmosphere just outside the limb (scale height stretched so it is a visible thread)
@@ -194,16 +198,26 @@ struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
 export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
   const { device, queue } = gpu;
   const BODY = [SUN, ...PLANETS, MOON], NB = BODY.length, F = 20, EARTH = 3, LUNA = NB - 1;
-  // heliocentric positions for the date (fixed for the session: the planets move far too slowly to see)
-  const pos = new Float64Array(NB * 3), radius = new Float64Array(NB), tmp = new Float64Array(3);
-  radius[0] = SUN.radius * KM_PC;
-  PLANETS.forEach((p, i) => { planetPos(i, jd, tmp); pos.set(tmp, (i + 1) * 3); radius[i + 1] = p.radius * KM_PC; });
-  // the Moon, around the Earth
-  moonPos(jd, tmp); for (let a = 0; a < 3; a++) pos[LUNA * 3 + a] = pos[EARTH * 3 + a] + tmp[a]; radius[LUNA] = MOON.radius * KM_PC;
-  // which way each body faces: north pole and prime meridian angle (fixed for the session, like the positions)
+  // heliocentric positions, and which way each body faces (north pole and prime meridian angle), for a date
+  const pos = new Float64Array(NB * 3), radius = new Float64Array(NB), tmp = new Float64Array(4);
   const frame = new Float64Array(NB * 4); frame[2] = 1;
-  for (let i = 1; i < NB; i++) frame.set(bodyFrame(BODY[i].name, jd, [0, 0, 0, 0]), i * 4);
-  const spin = frame[EARTH * 4 + 3] + Math.PI / 2;                         // Greenwich sidereal angle
+  radius[0] = SUN.radius * KM_PC; PLANETS.forEach((p, i) => { radius[i + 1] = p.radius * KM_PC; }); radius[LUNA] = MOON.radius * KM_PC;
+  function place(t) {
+    for (let i = 0; i < PLANETS.length; i++) { planetPos(i, t, tmp); pos[(i + 1) * 3] = tmp[0]; pos[(i + 1) * 3 + 1] = tmp[1]; pos[(i + 1) * 3 + 2] = tmp[2]; }
+    moonPos(t, tmp); for (let a = 0; a < 3; a++) pos[LUNA * 3 + a] = pos[EARTH * 3 + a] + tmp[a];   // the Moon, around the Earth
+    for (let i = 1; i < NB; i++) { bodyFrame(BODY[i].name, t, tmp); frame[i * 4] = tmp[0]; frame[i * 4 + 1] = tmp[1]; frame[i * 4 + 2] = tmp[2]; frame[i * 4 + 3] = tmp[3]; }
+  }
+  place(jd);
+  // Move everything to another date. A camera close to a body is carried along with it (not turned with it), so
+  // that running the clock fast shows the planet spin and its moon go round instead of leaving it behind.
+  function setTime(t) {
+    // which body, if any, the camera is beside now (it may have been moved since the last update())
+    let i = -1, best = Infinity;
+    for (let k = 1; k < NB; k++) { const alt = Math.hypot(pos[k * 3] - cam.p[0], pos[k * 3 + 1] - cam.p[1], pos[k * 3 + 2] - cam.p[2]) - radius[k]; if (alt < best) { best = alt; i = k; } }
+    const ride = i > 0 && best < radius[i] * 300, ox = pos[i * 3], oy = pos[i * 3 + 1], oz = pos[i * 3 + 2];
+    place(t);
+    if (ride) { cam.p[0] += pos[i * 3] - ox; cam.p[1] += pos[i * 3 + 1] - oy; cam.p[2] += pos[i * 3 + 2] - oz; }
+  }
   const names = BODY.map((p) => p.name);
 
   const module = device.createShaderModule({ code: SHADER });
@@ -322,7 +336,7 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
     const u = [-ex / ds, -ey / ds, -ez / ds];                              // to the Sun
     let S = null, best = -2;
     for (const [lon, lat] of SITES) {
-      const a = spin + lon * Math.PI / 180, b = lat * Math.PI / 180, v = [Math.cos(b) * Math.cos(a), Math.cos(b) * Math.sin(a), Math.sin(b)];
+      const a = frame[EARTH * 4 + 3] + Math.PI / 2 + lon * Math.PI / 180, b = lat * Math.PI / 180, v = [Math.cos(b) * Math.cos(a), Math.cos(b) * Math.sin(a), Math.sin(b)];
       const lit = v[0] * u[0] + v[1] * u[1] + v[2] * u[2];
       // the first site in good daylight wins; failing that, the best lit
       if (best < 0.6 && lit > best) { best = lit; S = v; }
@@ -349,5 +363,5 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
     const R = radius[EARTH] * 1.6, p = [pos[e] + v[0] * R, pos[e + 1] + v[1] * R, pos[e + 2] + v[2] * R];
     return { p, at: [p[0] + v[0], p[1] + v[1], p[2] + v[2]], up: [0, 0, 1] };
   }
-  return { update, draw, near, launch, night, hides, names, count: NB, pos: (i, a) => pos[i * 3 + a], radius: (i) => radius[i], AU: 1 / PC_AU };
+  return { update, draw, near, setTime, launch, night, hides, names, count: NB, pos: (i, a) => pos[i * 3 + a], radius: (i) => radius[i], AU: 1 / PC_AU };
 }

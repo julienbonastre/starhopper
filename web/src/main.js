@@ -16,6 +16,7 @@ import { initBeyond } from './beyond.js';
 import { initWeb } from './web.js';
 import { setSound, setVolume, setEngine, updateSound, level } from './audio.js';
 import { PLANETS, orbitPoints, jdNow } from './solar.js';
+import { retarget } from './flight.js';
 
 const body = document.body, canvas = $('c');
 const params = new URLSearchParams(location.search);
@@ -48,7 +49,7 @@ async function main() {
     $('ver').append(' \u00b7 ', a);
   }).catch(() => {});
   // a pull request's preview build says so, so that nobody takes it for the live site
-  if (PREVIEW) { const b = document.createElement('div'); b.textContent = 'Preview of pull request #' + PREVIEW; b.style.cssText = 'position:fixed;left:50%;top:6px;transform:translateX(-50%);white-space:nowrap;z-index:9;padding:4px 9px;border-radius:999px;background:#c8102e;color:#fff;font:600 11px system-ui;letter-spacing:.04em;pointer-events:none'; document.body.append(b); }
+  if (PREVIEW) { const b = document.createElement('div'); b.textContent = 'Preview of pull request #' + PREVIEW; b.style.cssText = 'position:fixed;left:50%;top:50px;transform:translateX(-50%);white-space:nowrap;z-index:9;padding:4px 9px;border-radius:999px;background:#c8102e;color:#fff;font:600 11px system-ui;letter-spacing:.04em;pointer-events:none'; document.body.append(b); }
   say('Reading the star and galaxy indexes', 0.3);
   const [stars, galPts, gal] = await Promise.all([
     initPoints(gpu, globalsBuf, base + 'stars/', quality, { budget: quality.starBudget, track: true, magOff: 20, sigma0: 0.62 }),
@@ -97,16 +98,17 @@ async function main() {
   const lines = initLines(gpu, globalsBuf, 8192), labels = initLabels(gpu, globalsBuf, () => pxScale);
   const LG_CON = 0, LG_ORBIT = 1;
   gal.names.forEach((n, i) => { if (n[1]) labels.add(n[0], 'galaxy', gal.pos(i, 0), gal.pos(i, 1), gal.pos(i, 2), gal.absmag(i), Infinity, gal.radius(i) * 1.2, 0, gal.radius(i)); });
+  const bodyLabel = [], bodyRow = [];
   // planets: orbit lines (the ellipse each is on today) and names
   {
     const NP = 160, op = new Float64Array(NP * 3);
     PLANETS.forEach((pl, i) => {
       orbitPoints(i, NP, op, jd);
       for (let k = 0; k < NP; k++) { const a = k * 3, b = ((k + 1) % NP) * 3; lines.add(op[a], op[a + 1], op[a + 2], op[b], op[b + 1], op[b + 2], 0.10, 0.13, 0.20, 0.5, LG_ORBIT); }
-      labels.add(pl.name, 'body', bodies.pos(i + 1, 0), bodies.pos(i + 1, 1), bodies.pos(i + 1, 2), NaN, 0.004, bodies.radius(i + 1) * 2.5, -10, bodies.radius(i + 1));
+      bodyLabel[i + 1] = labels.add(pl.name, 'body', bodies.pos(i + 1, 0), bodies.pos(i + 1, 1), bodies.pos(i + 1, 2), NaN, 0.004, bodies.radius(i + 1) * 2.5, -10, bodies.radius(i + 1));
     });
     const mn = bodies.count - 1;   // the Moon: named out to a few million kilometres
-    labels.add('Moon', 'body', bodies.pos(mn, 0), bodies.pos(mn, 1), bodies.pos(mn, 2), NaN, 2e-7, bodies.radius(mn) * 2.5, -10, bodies.radius(mn));
+    bodyLabel[mn] = labels.add('Moon', 'body', bodies.pos(mn, 0), bodies.pos(mn, 1), bodies.pos(mn, 2), NaN, 2e-7, bodies.radius(mn) * 2.5, -10, bodies.radius(mn));
   }
   labels.occluder(bodies.hides);
   place(0, bodies.night());
@@ -115,6 +117,8 @@ async function main() {
   const labelLimit = { star: 0, con: 0, body: 0, deep: 0, galaxy: 0, target: 99 };
   const kindGain = { star: 1, con: 1, body: 1, deep: 1, galaxy: 1, target: 1 };
   const tgtLabel = labels.add('', 'target', 0, 0, 0, NaN, 0, 0, -100);   // the target marker: hidden (maxDist 0) until something is picked
+  let going = null, nightStale = false;   // the catalogue row a fly-to is heading for (it may move); the night viewpoint needs replacing
+  const freshNight = () => { if (nightStale) { place(0, bodies.night()); nightStale = false; } };
   const target = { on: false, x: 0, y: 0, z: 0, stop: 0, name: '', row: null };
   const setLock = (on) => { flight.lock = on && target.on; $('tblk').classList.toggle('on', flight.lock); $('tblk').textContent = flight.lock ? 'Locked' : 'Lock'; };
 
@@ -129,15 +133,16 @@ async function main() {
 
   initInput(canvas, (code) => {
     if (code === 'KeyH') { showPerf = !showPerf; $('perf').hidden = !showPerf; }
-    else if (code === 'Home' || code === 'Digit0') flyTo(bodies.pos(3, 0), bodies.pos(3, 1), bodies.pos(3, 2), bodies.radius(3) * 4, 6);
+    else if (code === 'Home' || code === 'Digit0') going = bodyRow[3], flyTo(bodies.pos(3, 0), bodies.pos(3, 1), bodies.pos(3, 2), bodies.radius(3) * 4, 6);
     else if (code === 'KeyO') { setLock(!flight.lock); if (target.on) flash(flight.lock ? 'Locked on to ' + target.name : 'Lock released'); }
-    else if (code === 'KeyG') { if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } }
+    else if (code === 'Comma') setRate(rateI - 1); else if (code === 'Period') setRate(rateI + 1); else if (code === 'Slash') clockNow(); else if (code === 'KeyT') setRate(rateI === PAUSE ? lastRun : PAUSE);
+    else if (code === 'KeyG') { if (target.on) { (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9)); flash(target.name); } }
     else if (code === 'Touch') $('ctx').hidden = true;
     else if (code === 'Tap' || code === 'DoubleTap' || code === 'Hold') {
       const nx = flight.tapX / innerWidth * 2 - 1, ny = 1 - flight.tapY / innerHeight * 2, f = 1 / Math.tan(cam.fov / 2), asp = innerWidth / innerHeight;
       let dx = cam.right[0] * nx * asp / f + cam.up[0] * ny / f + cam.fwd[0], dy = cam.right[1] * nx * asp / f + cam.up[1] * ny / f + cam.fwd[1], dz = cam.right[2] * nx * asp / f + cam.up[2] * ny / f + cam.fwd[2];
       const n = Math.hypot(dx, dy, dz); pick(dx / n, dy / n, dz / n);
-      if (code === 'DoubleTap' && target.on) flyTo(target.x, target.y, target.z, target.stop, 9);
+      if (code === 'DoubleTap' && target.on) (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9));
       // held on something: offer to go there, in a small menu beside the finger
       if (code === 'Hold' && target.on) {
         const c = $('ctx'); flight.menu = true; $('ctxn').textContent = target.name;
@@ -154,7 +159,7 @@ async function main() {
     else if (code === 'KeyX') { show.exo = !show.exo; syncToggles(); flash(show.exo ? markers.count.toLocaleString() + ' stars with known planets' : 'Exoplanet hosts hidden'); }
     else if (code === 'KeyM') { show.sound = setSound(!show.sound); syncToggles(); keep('starhopperSound', show.sound ? 1 : 0); flash(show.sound ? 'Sound on' : 'Sound off'); }
     else if (code === 'KeyP') { show.proc = !show.proc; syncToggles(); flash(show.proc ? 'Procedural fill on' : 'Measured data only'); }
-    else if (/^Digit[1-8]$/.test(code)) { setPose(+code[5] - 1); state.snap = 1; flash(POSES[+code[5] - 1].name); }
+    else if (/^Digit[1-8]$/.test(code)) { freshNight(); setPose(+code[5] - 1); state.snap = 1; flash(POSES[+code[5] - 1].name); }
     else if (code === 'Unlocked' && !params.has('auto')) { body.classList.remove('fly'); if (flight.wheel) flight.thr = 0; }   // the menu is a pause: a scrolled throttle is let go
     else if (code === 'KeyB' && params.has('bench')) { flash('Benchmark running'); runBench().then((r) => { showPerf = true; $('perf').hidden = false; console.log(JSON.stringify(r)); flash('Benchmark done'); $('s').textContent = JSON.stringify(r); body.classList.remove('fly'); }); }
   });
@@ -173,7 +178,7 @@ async function main() {
   // rows: search key, shown name, position, where a fly-to stops, absolute magnitude, kind (0 star, 1 galaxy, 2 planet, 3 nebula or cluster), radius
   const index = [];
   gal.names.forEach((n, i) => index.push([n[0].toLowerCase(), n[0], gal.pos(i, 0), gal.pos(i, 1), gal.pos(i, 2), gal.radius(i) * 3.2, gal.absmag(i), 1, gal.radius(i)]));
-  for (let i = 1; i < bodies.count; i++) index.push([bodies.names[i].toLowerCase(), bodies.names[i], bodies.pos(i, 0), bodies.pos(i, 1), bodies.pos(i, 2), bodies.radius(i) * 4, -99, 2, bodies.radius(i)]);
+  for (let i = 1; i < bodies.count; i++) index.push(bodyRow[i] = [bodies.names[i].toLowerCase(), bodies.names[i], bodies.pos(i, 0), bodies.pos(i, 1), bodies.pos(i, 2), bodies.radius(i) * 4, -99, 2, bodies.radius(i)]);
   // target whatever lies closest to a view ray (unit vector), among the things bright enough to be on screen
   let curMag = 6, curGal = 12;
   function pick(dx, dy, dz) {
@@ -216,7 +221,7 @@ async function main() {
     return out;
   }
   let sugHits = [];
-  const flyHit = (r) => { $('find').blur(); setTarget(r); launch(); flyTo(r[2], r[3], r[4], r[5], 9); state.snapSoon = 0; };
+  const flyHit = (r) => { $('find').blur(); setTarget(r); launch(); going = r; flyTo(r[2], r[3], r[4], r[5], 9); state.snapSoon = 0; };
   function suggest() {
     sugHits = search($('find').value, MOBILE ? 5 : 7);
     $('sug').replaceChildren(...sugHits.map((r, i) => {
@@ -268,7 +273,7 @@ async function main() {
   // (a mouse click only: the click a phone makes up after a tap must not lock the pointer, which swallows every touch after it)
   canvas.onclick = (e) => { if (!body.classList.contains('fly') || MOBILE || (e.pointerType && e.pointerType !== 'mouse')) return; if (flight.locked) pick(cam.fwd[0], cam.fwd[1], cam.fwd[2]); else canvas.requestPointerLock?.()?.catch?.(() => {}); };
   // viewpoints and save points (kept in this browser only)
-  POSES.forEach((p, i) => { const b = document.createElement('button'); b.textContent = p.name; b.onclick = () => { cancelGoto(); setPose(i); state.snap = 1; launch(); flash(p.name); }; $('vp').append(b); });
+  POSES.forEach((p, i) => { const b = document.createElement('button'); b.textContent = p.name; b.onclick = () => { cancelGoto(); freshNight(); setPose(i); state.snap = 1; launch(); flash(p.name); }; $('vp').append(b); });
   let saves = []; try { saves = JSON.parse(localStorage.starhopperSaves || '[]'); } catch {}
   const drawSaves = () => {
     $('svl').textContent = '';
@@ -285,10 +290,38 @@ async function main() {
     saves.push({ n: n.slice(0, 40), p: [cam.p[0], cam.p[1], cam.p[2]], q: [cam.q[0], cam.q[1], cam.q[2], cam.q[3]] });
     keep('starhopperSaves', JSON.stringify(saves)); $('svn').value = ''; drawSaves(); $('s').textContent = 'Saved: ' + n;
   };
-  $('ctxgo').onclick = () => { $('ctx').hidden = true; flight.menu = false; if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } };
+  $('ctxgo').onclick = () => { $('ctx').hidden = true; flight.menu = false; if (target.on) { (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9)); flash(target.name); } };
   // the bar under a target: go there (or stop going there), or let it go
-  $('tbgo').onclick = () => { if (flight.goto) cancelGoto(); else if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } };
+  $('tbgo').onclick = () => { if (flight.goto) cancelGoto(); else if (target.on) { (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9)); flash(target.name); } };
   $('tblk').onclick = () => { setLock(!flight.lock); flash(flight.lock ? 'Locked on to ' + target.name : 'Lock released'); };
+  // The clock. It starts at the present, running at the true rate; the buttons step through faster rates (and
+  // backwards), pause it, or bring it back to now. Only the Sun's family moves: the stars are too far to show it.
+  const RATES = [-31557600, -2592000, -86400, -3600, 0, 1, 60, 3600, 86400, 2592000, 31557600];   // seconds of the clock per second
+  const RATE_NAME = ['\u22121 year/s', '\u22121 month/s', '\u22121 day/s', '\u22121 hour/s', 'paused', 'real time', '1 min/s', '1 hour/s', '1 day/s', '1 month/s', '1 year/s'], PAUSE = 4;
+  let simJd = jd, rateI = 5, lastRun = 5, clockShown = '', clockAt = 0;
+  function setRate(i) { rateI = Math.max(0, Math.min(RATES.length - 1, i)); if (rateI !== PAUSE) lastRun = rateI; $('tcr').textContent = RATE_NAME[rateI]; $('tcp').innerHTML = rateI === PAUSE ? '&#9654;' : '&#10074;&#10074;'; }
+  $('tcs').onclick = () => setRate(rateI - 1); $('tcf').onclick = () => setRate(rateI + 1); $('tcp').onclick = () => setRate(rateI === PAUSE ? lastRun : PAUSE);
+  const clockNow = () => { simJd = jdNow(); setRate(5); clockAt = 0; flash('The present'); };
+  $('tcn').onclick = clockNow;
+  setRate(5);
+  // The clock keeps its own time: the flight's step is capped at a tenth of a second, which would run the clock
+  // slow on a slow machine. Real time counts every second that passed, hidden tab included; the fast rates count
+  // at most one second per frame, so that coming back to the tab does not skip centuries.
+  function tick(now) {
+    const el = clockAt ? (now - clockAt) / 1000 : 0; clockAt = now;
+    if (rateI === PAUSE || state.frozen) return;
+    simJd += (rateI === 5 ? el : Math.min(el, 1)) * RATES[rateI] / 86400;
+    bodies.setTime(simJd); nightStale = true;
+    if (!flight.goto) going = null;
+    for (let i = 1; i < bodies.count; i++) {
+      const x = bodies.pos(i, 0), y = bodies.pos(i, 1), z = bodies.pos(i, 2), r = bodyRow[i];
+      r[2] = x; r[3] = y; r[4] = z; const lb = labels.items[bodyLabel[i]]; lb.x = x; lb.y = y; lb.z = z;
+      if (target.on && target.row === r) { target.x = x; target.y = y; target.z = z; const tl = labels.items[tgtLabel]; tl.x = x; tl.y = y; tl.z = z; }
+      if (going === r && flight.goto) retarget(x, y, z);
+    }
+    const d = new Date((simJd - 2440587.5) * 86400000), text = isFinite(d) ? d.toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
+    if (text !== clockShown) $('tcd').textContent = clockShown = text;
+  }
   $('tbx').onclick = () => { cancelGoto(); pick(0, 0, 0); };
   $('ctxno').onclick = () => { $('ctx').hidden = true; flight.menu = false; };
   $('svb').onclick = save;
@@ -371,6 +404,7 @@ async function main() {
     flight.context = Math.min(ctx, 3e8);
     const bn = bodies.near;
     if (bn.id >= 0) flight.context = Math.min(flight.context, Math.max(bn.alt, bodies.radius(bn.id) * 0.02));
+    tick(now);   // the clock first, so that the flight, the lock and the picture all use this frame's positions
     // Lock: the camera keeps facing the target, and its range changes only while thrust toward or away from it is on,
     // so thrust sideways or up and down carries it around the target in a circle.
     const locked = flight.lock && target.on && !flight.goto && !state.frozen;
@@ -566,7 +600,7 @@ async function main() {
   // scripted fly-through of all eight viewpoints (about 90 s); resolves with frame and GPU time statistics
   // fly to a viewpoint and arrive looking the way it looks
   const poseQ = new Float64Array(4);
-  const flyPose = (i, secs) => { const p = POSES[i]; lookQuat(poseQ, p.at[0] - p.p[0], p.at[1] - p.p[1], p.at[2] - p.p[2], p.up[0], p.up[1], p.up[2]); flyTo(p.p[0], p.p[1], p.p[2], 0, secs, poseQ); };
+  const flyPose = (i, secs) => { freshNight(); going = null; const p = POSES[i]; lookQuat(poseQ, p.at[0] - p.p[0], p.at[1] - p.p[1], p.at[2] - p.p[2], p.up[0], p.up[1], p.up[2]); flyTo(p.p[0], p.p[1], p.p[2], 0, secs, poseQ); };
   const runBench = async (secs = 11) => {
     const stat = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? { avg: +(s.reduce((x, y) => x + y, 0) / s.length).toFixed(2), p99: +s[Math.floor(s.length * 0.99)].toFixed(2), max: +s[s.length - 1].toFixed(2), n: s.length } : null; };
     setPose(0); state.snap = 1; await new Promise((r) => setTimeout(r, 1500));
