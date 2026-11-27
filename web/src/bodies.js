@@ -91,7 +91,13 @@ fn hash1(x: f32) -> f32 { return fract(sin(x * 127.1) * 43758.5453); }
         var cp = e * 2.6; cp += (vec3f(vnoise(cp * 0.9 + 4.0), vnoise(cp.yzx * 0.9 + 9.0), vnoise(cp.zxy * 0.9)) - 0.5) * 1.6;
         let cf = vnoise(cp) * 0.36 + vnoise(cp * 2.3 + 7.1) * 0.28 + vnoise(cp * 5.3 + 2.9) * 0.21 + (vnoise(cp * 12.1 + 5.5) * 0.15 - 0.075) * smoothstep(8.0, 60.0, i.col.a) + 0.075;
         let belt = 0.05 * cos(e.z * 10.5) - 0.07 * smoothstep(0.1, 0.45, abs(abs(e.z) - 0.42)) + 0.05;
-        let cover = smoothstep(0.55, 0.68, cf + belt) * 0.9;
+        // fine structure once the clouds are close enough to show it
+        let near = smoothstep(120.0, 900.0, i.col.a);
+        let fine = (vnoise(cp * 27.0 + 1.7) - 0.5) * 0.10 + (vnoise(cp * 61.0 + 8.3) - 0.5) * 0.07;
+        let cover = smoothstep(0.55, 0.66, cf + belt + fine * near) * 0.92;
+        // the same field a little way toward the Sun: where it is cloudy there, this ground is in shadow
+        let cps = cp + l * 0.035;
+        let shade = smoothstep(0.55, 0.66, vnoise(cps) * 0.36 + vnoise(cps * 2.3 + 7.1) * 0.28 + vnoise(cps * 5.3 + 2.9) * 0.21 + 0.075 + belt) * near;
         let day = smoothstep(-0.08, 0.22, lit);
         let water = smoothstep(0.03, 0.12, t.b - max(t.r, t.g)) * (1.0 - cover);
         let hv = normalize(l - d);
@@ -99,7 +105,9 @@ fn hash1(x: f32) -> f32 { return fract(sin(x * 127.1) * 43758.5453); }
         // air: bluish scattering over everything, thickening toward the limb and warming at the terminator
         let air = pow(1.0 - mu, 4.0);
         let sky = mix(vec3f(0.25, 0.48, 1.0), vec3f(1.0, 0.45, 0.2), smoothstep(0.25, -0.05, lit) * smoothstep(-0.2, 0.0, lit));
-        let ground = mix(t * 1.12 * (1.0 - 0.4 * cover), vec3f(0.93, 0.95, 1.0), cover * 0.92);
+        // the map runs out of detail up close: a little grain in the land keeps it from looking smeared
+        let grain = 1.0 + (vnoise(e * 310.0) - 0.5) * 0.22 * near * (1.0 - water);
+        let ground = mix(t * 1.12 * grain * (1.0 - 0.45 * shade), vec3f(0.93, 0.95, 1.0) * (0.86 + 0.28 * vnoise(cp * 14.0 + 3.0)), cover);
         body = (ground * max(lit, 0.0) + vec3f(1.0, 0.95, 0.85) * glint) * day;
         body = mix(body, sky * max(lit, 0.0) * 0.9, 0.09) + sky * air * 0.55 * smoothstep(-0.12, 0.15, lit);
       } else {
@@ -265,7 +273,7 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
   // best daylight right now, looking across it to the Earth's limb with the Sun off to one side.
   // Returns position, look-at point and up vector.
   const SITES = [[12, 41], [-80, 24], [103, 8], [138, 35], [-5, 36], [33, 26], [78, 18], [-114, 29], [150, -30], [-43, -18], [-70, -42], [22, -30]];   // east longitude, latitude, in order of preference
-  function launch(altKm = 1400) {
+  function launch(altKm = 2000) {
     const e = EARTH * 3, ex = pos[e], ey = pos[e + 1], ez = pos[e + 2], ds = Math.hypot(ex, ey, ez);
     const u = [-ex / ds, -ey / ds, -ez / ds];                              // to the Sun
     let S = null, best = -2;

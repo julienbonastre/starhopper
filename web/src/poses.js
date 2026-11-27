@@ -9,6 +9,7 @@ export const NGP = eq(192.85948, 27.12825, 1);                // north galactic 
 export const GC = eq(266.40499, -28.93617, 8178);             // galactic centre (Sgr A*), GRAVITY 2019 distance
 const pleiades = eq(56.75, 24.117, 136.2), orionNeb = eq(83.822, -5.391, 412), m31 = eq(10.6847, 41.2687, 765000), virgo = eq(187.706, 12.391, 16.5e6);
 const north = [0, 0, 1];
+const m33 = eq(23.462, 30.660, 850000);
 
 export const POSES = [
   { name: 'Earth night sky', p: [1 / PC_AU, 0, 0], at: eq(84, 0, 100), up: north },
@@ -17,7 +18,8 @@ export const POSES = [
   { name: 'Inside the Orion nebula', p: add(orionNeb, unit(orionNeb), -3.5), at: orionNeb, up: north },
   { name: 'Above the galactic disc', p: add(add(GC, NGP, 26000), unit(GC), -9000), at: GC, up: unit(GC) },
   { name: 'Approaching Andromeda', p: add(m31, unit(m31), -52000), at: m31, up: NGP },
-  { name: 'The Local Group', p: add(add(m31, [0, 0, 0], 0.5), NGP, 1.1e6), at: add(m31, [0, 0, 0], -0.45), up: unit(m31) },
+  // from behind the Triangulum galaxy, looking past it to Andromeda, with the Milky Way beyond them both
+  { name: 'The Local Group', p: add(add(m33, unit(add(m33, m31, -1)), 46000), NGP, -14000), at: add(m33, add(m31, m33, -1), 0.45), up: NGP },
   { name: 'The cosmic web', p: add(virgo, NGP, 5.5e7), at: virgo, up: unit(GC) },
 ];
 

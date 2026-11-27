@@ -37,7 +37,8 @@ const CORE = 6.5;     // ... up to this sigma in CSS pixels
   let absmag = f32(s.w >> 16u) * 0.001 - L.magOff;
   // energy in CSS-pixel units: exposure * 10^(-0.4 m), m = absmag + 5 log10(d / 10 pc)
   let e = G.exposure * L.gain * exp(-0.9210340 * absmag) * 100.0 / d2;
-  let s0 = L.sigma0 * G.pxScale;
+  var s0 = L.sigma0 * G.pxScale;
+  if (L.sigma0 > 0.9) { s0 *= 0.75 + 1.3 * fract(f32((s.x * 7u + s.y * 13u + s.z * 29u) & 1023u) / 1024.0 * 7.13); }   // galaxies come in sizes
   // A star's disc grows with its brightness only so far (CORE pixels): beyond that it would read as a ball. The
   // rest shows as glare, a wide soft halo whose reach grows with the logarithm of the excess.
   let ep = e * G.pxScale * G.pxScale;
@@ -48,7 +49,7 @@ const CORE = 6.5;     // ... up to this sigma in CSS pixels
   // the sprite only needs to reach where its Gaussian has faded from sight: most stars are faint, and a snug quad
   // for them saves most of the fill
   let snug = clamp(sqrt(2.0 * log(max(peak / 0.0008, 1.2))), 0.9, 3.6);
-  let reach = sigma * min(snug + 2.2 * over * glare, 30.0);
+  let reach = sigma * min(snug + 1.3 * over * glare, 18.0);
   let p = project(rel);
   if (peak < 0.0035 || p.z > 1.0) { o.pos = vec4f(0.0, 0.0, 2.0, 1.0); return o; }
   let half = reach + 1.0;
@@ -61,7 +62,7 @@ const CORE = 6.5;     // ... up to this sigma in CSS pixels
     let k = fract((hsh.x + hsh.y) * hsh.z);
     o.col = mix(vec3f(1.0, 0.80, 0.58), vec3f(0.66, 0.80, 1.0), k * k);
   }
-  o.prm = vec4f(peak, sigma, reach / sigma, min(0.05 * over, 0.6) * glare);
+  o.prm = vec4f(peak, sigma, reach / sigma, min(0.03 * over, 0.35) * glare);
   return o;
 }
 @fragment fn fs(i: VO) -> @location(0) vec4f {

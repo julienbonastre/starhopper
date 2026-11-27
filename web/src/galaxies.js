@@ -42,7 +42,7 @@ fn galParams(t: u32, flat: f32, seed: u32) -> GalP {
 // Surface brightness is shown as the flux falling on one pixel of a reference view (1000 px tall, 60 degrees), so the
 // balance between stars and extended light does not depend on the window size.
 const OMEGA = 1.3333e-6;
-const OLD = vec3f(1.0, 0.80, 0.56);
+const OLD = vec3f(1.0, 0.86, 0.68);
 const YOUNG = vec3f(0.60, 0.76, 1.0);
 const HII = vec3f(1.0, 0.28, 0.42);
 // emission (rgb, luminosity per unit volume for a galaxy of unit radius and unit luminosity) and dust (a) at q.
@@ -98,7 +98,7 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32, t: f32, foot: f32) -> vec4f 
   // dust: a thin, patchy layer. Its mid-plane wanders and its density comes in clouds, so that seen edge-on (or from
   // inside) the lane breaks up into rifts and windows instead of one ruled line.
   let zd = abs(q.z + (n1 - 0.5) * p.hz * 1.3 * detail);
-  let cloud = mix(1.0, 4.0 * smoothstep(0.45, 0.66, nf), detail);
+  let cloud = mix(1.0, 4.4 * smoothstep(0.42, 0.7, nf), detail);
   let dust = (1.0 - p.fb) * exp(-r / (p.h * 1.5) - zd / (p.hz * 0.5)) * (0.2 + 2.4 * cd * cd * cd * cd * inner * p.armC + p.clump) * cloud * (1.0 - smoothstep(1.0, 1.5, r));
   return vec4f(col, dust);
 }
@@ -262,7 +262,8 @@ struct VO {
       let ax = normalize(cross(n, select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), abs(n.x) > 0.7)));
       let ay = cross(n, ax);
       let q = vec3f(dot(hit, ax), dot(hit, ay), 0.0);
-      let v = galEmit(q, P, f32(i.id.y & 1023u), select(0.0, 1.0, i.prm.w > 40.0), 10.0, 1.0 / (i.prm.w * G.pxScale));
+      var Ps = P; Ps.armC *= smoothstep(10.0, 60.0, i.prm.w);
+      let v = galEmit(q, Ps, f32(i.id.y & 1023u), select(0.0, 1.0, i.prm.w > 40.0), 10.0, 1.0 / (i.prm.w * G.pxScale));
       // the bulge's share of v, exactly as galEmit adds it (outer cut included: without it the difference goes
       // negative past r = 1 and the disc ends in a hard edge)
       let rq = dot(q.xy, q.xy);
@@ -286,7 +287,7 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f }
   var o: VO; let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u)) * 2.0 - 1.0;
   o.pos = vec4f(p, 0.0, 1.0); o.ndc = p; return o;
 }
-fn ign(p: vec2f) -> f32 { var q = fract(vec3f(p.xyx) * 0.1031 + fract(G.time * 7.31)); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+fn ign(p: vec2f) -> f32 { return 0.25 + 0.5 * fract(52.9829189 * fract(dot(p, vec2f(0.06711056, 0.00583715)))); }
 @fragment fn fs(i: VO) -> @location(0) vec4f {
   let d = normalize(G.right * i.ndc.x * G.aspect / G.focal + G.up * i.ndc.y / G.focal + G.fwd);
   let omega = OMEGA;
@@ -343,7 +344,14 @@ const BLIT = /*wgsl*/`
 @group(0) @binding(1) var smp: sampler;
 struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
 @vertex fn vs(@builtin(vertex_index) i: u32) -> VO { var o: VO; let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u)); o.pos = vec4f(p * 2.0 - 1.0, 0.0, 1.0); o.uv = vec2f(p.x, 1.0 - p.y); return o; }
-@fragment fn fs(i: VO) -> @location(0) vec4f { return vec4f(textureSampleLevel(src, smp, i.uv, 0.0).rgb, 1.0); }`;
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  // a wide tent over the reduced-resolution haze: the march's sampling pattern does not survive it
+  let t = 1.25 / vec2f(textureDimensions(src));
+  var c = textureSampleLevel(src, smp, i.uv, 0.0).rgb * 0.2;
+  c += (textureSampleLevel(src, smp, i.uv + t * vec2f(1.0, 0.4), 0.0).rgb + textureSampleLevel(src, smp, i.uv + t * vec2f(-1.0, -0.4), 0.0).rgb
+      + textureSampleLevel(src, smp, i.uv + t * vec2f(-0.4, 1.0), 0.0).rgb + textureSampleLevel(src, smp, i.uv + t * vec2f(0.4, -1.0), 0.0).rgb) * 0.2;
+  return vec4f(c, 1.0);
+}`;
 
 export async function initGalaxies(gpu, globalsBuf, base, quality) {
   const { device, queue } = gpu;
@@ -442,7 +450,7 @@ export async function initGalaxies(gpu, globalsBuf, base, quality) {
       vu[b + 16] = (u[o + 3] >>> 8) & 255; vu[b + 17] = u[o + 9];
       nVol++;
     }
-    vf[80] = quality.volSteps; vf[81] = nVol; vf[82] = 34; vf[83] = 2 * Math.tan(cam.fov / 2) / (H * quality.volScale);   // angle of one pixel of the volume target
+    vf[80] = quality.volSteps; vf[81] = nVol; vf[82] = 46; vf[83] = 2 * Math.tan(cam.fov / 2) / (H * quality.volScale);   // angle of one pixel of the volume target
     queue.writeBuffer(volBuf, 0, volData);
     // fill stars: hosted by the looming galaxy the camera is in or close to
     let host = -1;

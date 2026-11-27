@@ -39,10 +39,10 @@ fn vnoise(p: vec3f) -> f32 {
   o.uv = corner * half; o.ndc = o.pos.xy;
   return o;
 }
-fn ign(p: vec2f) -> f32 { var q = fract(vec3f(p.xyx) * 0.1031 + fract(G.time * 7.31)); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
-const HA = vec3f(1.0, 0.22, 0.30);        // hydrogen alpha with a little H beta: the pink of emission nebulae
+fn ign(p: vec2f) -> f32 { return 0.25 + 0.5 * fract(52.9829189 * fract(dot(p, vec2f(0.06711056, 0.00583715)))); }
+const HA = vec3f(1.0, 0.16, 0.26);        // hydrogen alpha with a little H beta: the pink of emission nebulae
 const O3 = vec3f(0.25, 0.95, 0.80);       // doubly ionised oxygen: teal
-const DUSTBLUE = vec3f(0.45, 0.62, 1.0);  // starlight scattered by dust
+const DUSTBLUE = vec3f(0.36, 0.56, 1.0);  // starlight scattered by dust
 const OLDSTAR = vec3f(1.0, 0.84, 0.62);
 const YOUNGSTAR = vec3f(0.72, 0.82, 1.0);
 @fragment fn fs(i: VO) -> @location(0) vec4f {
@@ -97,19 +97,19 @@ const YOUNGSTAR = vec3f(0.72, 0.82, 1.0);
             let n3 = vnoise(vec3f(w2.z * 0.6 - w2.x * 0.8, w2.y, w2.z * 0.8 + w2.x * 0.6) * 2.9 + 3.7);
             let rr = r * (0.6 + 0.95 * vnoise(q * 1.25 + sd * 0.7));
             let f = n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
-            let cloud = smoothstep(0.45, 0.58, f);
+            let cloud = smoothstep(0.4, 0.62, f);
             let rim = pow(1.0 - abs(2.0 * (n2 * 0.6 + n3 * 0.4) - 1.0), 5.0);
             let body = exp(-rr * rr / 0.13);
-            dust = body * smoothstep(0.5, 0.64, vnoise(w1 * 1.7 + 5.0) * 0.6 + n3 * 0.4) * 22.0;
+            dust = body * smoothstep(0.48, 0.68, vnoise(w1 * 1.7 + 5.0) * 0.6 + n3 * 0.4) * 22.0;
             if (gas) {
               // emission: pink hydrogen, turning teal and far brighter toward the stars that light it
               let core = exp(-rr * rr / 0.022);
               // (the gas right around the camera is left out: from inside, it is the far walls that are seen)
-              em = mix(HA, O3, min(core * 0.75, 0.7)) * body * (cloud * (0.12 + 3.4 * rim) + 4.0 * core * (0.4 + cloud)) * (1.0 / 0.42) * smoothstep(0.0, 0.4, tc);
+              em = (HA * body * cloud * (0.12 + 3.4 * rim) + vec3f(0.80, 1.0, 0.92) * 7.0 * core * (0.35 + cloud)) * (1.0 / 0.42) * smoothstep(0.0, 0.4, tc);
             } else {
               // reflection: blue starlight on dust, in fine combed wisps
               let wisp = pow(1.0 - abs(2.0 * vnoise(vec3f(w2.x * 3.5, w2.y * 0.9, w2.z * 0.9)) - 1.0), 3.0);
-              em = mix(DUSTBLUE, vec3f(0.75, 0.82, 1.0), cloud) * body * (0.04 + 1.3 * cloud * (0.35 + wisp)) * (1.0 / 0.6);
+              em = mix(DUSTBLUE, vec3f(0.62, 0.76, 1.0), cloud) * body * (0.04 + 1.3 * cloud * (0.35 + wisp)) * select(1.0 / 0.6, 1.0 / 0.2, kind == 6.0);
               dust *= 0.4;
             }
           }
