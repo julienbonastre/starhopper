@@ -186,19 +186,54 @@ async function main() {
     }
     // nothing there, or the target itself picked again: no target
     if (best >= 0 && target.on && index[best][2] === target.x && index[best][3] === target.y && index[best][4] === target.z) best = -1;
-    if (best < 0) { target.on = false; labels.items[tgtLabel].maxDist = 0; $('htr').hidden = true; $('tb').classList.remove('on'); return; }
-    const r = index[best];
+    if (best < 0) { target.on = false; labels.items[tgtLabel].maxDist = 0; $('htr').hidden = true; $('tb').classList.remove('on'); $('arr').classList.remove('on'); return; }
+    setTarget(index[best]);
+  }
+  function setTarget(r) {
     target.on = true; target.x = r[2]; target.y = r[3]; target.z = r[4]; target.stop = r[5]; target.name = r[1];
     labels.move(tgtLabel, '\u25C7 ' + r[1], r[2], r[3], r[4], r[8]); labels.items[tgtLabel].maxDist = Infinity; labelT = 1;
     $('htr').hidden = false; $('tb').classList.add('on'); $('tbn').textContent = r[1]; flash(r[1]);
   }
+  // Search: the best few matches are listed as you type. Exact names first, then names that start with what was
+  // typed, then a word in the name that does, then anywhere in it, then the letters in order with gaps (a typo's
+  // worth of slack). Picking one makes it the target; its Fly button, or Enter, goes there.
+  const KIND = ['star', 'galaxy', 'Solar System', 'nebula or cluster'];
+  function search(text, max = 7) {
+    const q = text.trim().toLowerCase().replace(/^m(\d)/, 'm $1').replace(/^ngc(\d)/, 'ngc $1').replace(/^ic(\d)/, 'ic $1'); if (!q) return [];
+    const hits = [], seen = new Set();
+    for (const r of index) {
+      const n = r[0]; let sc = -1;
+      if (n === q) sc = 0; else if (n.startsWith(q)) sc = 1 + n.length / 1000;
+      else { const at = n.indexOf(q); if (at > 0) sc = (n[at - 1] === ' ' ? 2 : 3) + n.length / 1000; }
+      if (sc < 0 && q.length >= 3 && n.length < 40) { let k = 0, gaps = 0, last = -1; for (let c = 0; c < n.length && k < q.length; c++) if (n[c] === q[k]) { if (last >= 0) gaps += c - last - 1; last = c; k++; } if (k === q.length && gaps <= 3) sc = 4 + gaps / 10 + n.length / 1000; }
+      if (sc >= 0) hits.push([sc, r]);
+    }
+    hits.sort((a, b) => a[0] - b[0]);
+    const out = [];
+    for (const [, r] of hits) { const key = r[1] + r[2]; if (seen.has(key)) continue; seen.add(key); out.push(r); if (out.length >= max) break; }
+    return out;
+  }
+  let sugHits = [];
+  const flyHit = (r) => { $('find').blur(); setTarget(r); launch(); flyTo(r[2], r[3], r[4], r[5], 9); state.snapSoon = 0; };
+  function suggest() {
+    sugHits = search($('find').value, MOBILE ? 5 : 7);
+    $('sug').replaceChildren(...sugHits.map((r, i) => {
+      const row = document.createElement('div'), nm = document.createElement('span'), info = document.createElement('small'), go = document.createElement('button');
+      nm.textContent = r[1]; info.textContent = KIND[r[7]] + ' \u00b7 ' + fmtDist(Math.hypot(r[2] - cam.p[0], r[3] - cam.p[1], r[4] - cam.p[2])); go.textContent = 'Fly';
+      if (!i) row.className = 'sel';
+      row.onclick = () => { $('find').blur(); setTarget(r); launch(); };
+      go.onclick = (e) => { e.stopPropagation(); flyHit(r); };
+      row.append(nm, info, go); return row;
+    }));
+  }
+  $('find').addEventListener('input', suggest);
   $('find').addEventListener('keydown', (e) => {
     e.stopPropagation();
     if (e.key !== 'Enter') return;
-    const q = e.target.value.trim().toLowerCase().replace(/^m(\d)/, 'm $1').replace(/^ngc(\d)/, 'ngc $1'); if (!q) return;
-    const hit = index.find((r) => r[0] === q) || index.find((r) => r[0].startsWith(q)) || index.find((r) => r[0].includes(q));
+    if (!e.target.value.trim()) return;
+    const hit = search(e.target.value, 1)[0];
     if (!hit) { $('s').textContent = 'Nothing in the catalogues matches that name'; return; }
-    e.target.blur(); launch(); flyTo(hit[2], hit[3], hit[4], hit[5], 9); state.snapSoon = 0; flash(hit[1]);
+    flyHit(hit);
   });
   fetch(base + 'manifest.json').then((r) => r.json()).then((m) => {
     $('crb').innerHTML = m.sources.map((x) => `<p><a href="${x.home}" target="_blank" rel="noopener">${x.title}</a><br>${x.credit}. ${x.licence}.</p>`).join('') + '<p>Procedural fill (galaxy shapes, the Milky Way beyond the catalogue, fill stars) is a model, not data. Press P to hide it.</p>';
@@ -268,7 +303,7 @@ async function main() {
 
   // Everything the first frame does not need: names, constellation figures, nebulae and clusters, exoplanet hosts.
   // Fetched together once the flight is already on screen.
-  let web = null, thrShown = 0;
+  let web = null, thrShown = 0, joyX = 0, joyY = 0;
   initWeb(gpu, globalsBuf, base).then((w) => { web = w; }).catch((e) => console.warn('no density grid', e));
   const extras = Promise.all([fetch(base + 'names.json').then((r) => r.json()), fetch(base + 'constellations.json').then((r) => r.json()),
     initDeep(gpu, globalsBuf, base, gal.noise), fetch(base + 'exoplanets.json').then((r) => r.json()).catch(() => ({ hosts: [] }))]).then(([names, cons, dp, exo]) => {
@@ -319,6 +354,7 @@ async function main() {
     const bn = bodies.near;
     if (bn.id >= 0) flight.context = Math.min(flight.context, Math.max(bn.alt, bodies.radius(bn.id) * 0.02));
     if (!state.frozen) updateFlight(dt); else basis();
+    if (flight.sx !== joyX || flight.sy !== joyY) { joyX = flight.sx; joyY = flight.sy; const k = $('joyk'); k.style.transform = `translate(${(joyX * 26).toFixed(1)}px,${(-joyY * 26).toFixed(1)}px)`; k.className = joyX || joyY ? 'on' : ''; }
     if (flight.thr !== thrShown) { thrShown = flight.thr; const k = $('thrk'); k.style.transform = `translateY(${(-thrShown * innerHeight * 0.32).toFixed(1)}px)`; k.className = thrShown ? 'on' : ''; }
     bodies.update();
 
@@ -389,6 +425,24 @@ async function main() {
       labels.choose(W, H, pxScale, labelLimit, kindGain);
     }
     labels.update(dt, W, H, pxScale, kindGain);
+    // The target's marker: a ring on it while it is in view, and otherwise an arrow at the edge of the screen
+    // pointing the way to turn to face it (behind you included).
+    if (target.on) {
+      const tx = target.x - cam.p[0], ty = target.y - cam.p[1], tz = target.z - cam.p[2];
+      const vx = tx * cam.right[0] + ty * cam.right[1] + tz * cam.right[2], vy = tx * cam.up[0] + ty * cam.up[1] + tz * cam.up[2], vz = tx * cam.fwd[0] + ty * cam.fwd[1] + tz * cam.fwd[2];
+      const f = 1 / Math.tan(cam.fov / 2), iw = innerWidth, ih = innerHeight, nx = vz > 0 ? vx / vz * f * ih / iw : 9, ny = vz > 0 ? vy / vz * f : 9, a = $('arr');
+      const inView = vz > 0 && Math.abs(nx) < 0.9 && Math.abs(ny) < 0.86;
+      let px, py, rot = 0;
+      if (inView) { px = (nx + 1) * iw / 2; py = (1 - ny) * ih / 2; }
+      else {
+        // along the on-screen direction to it, out to an inset rectangle
+        let ux = vx, uy = vy; const n = Math.hypot(ux, uy) || 1; ux /= n; uy /= n;
+        const hw = iw / 2 - 96, hh = ih / 2 - 44, k = Math.min(hw / Math.max(Math.abs(ux), 1e-6), hh / Math.max(Math.abs(uy), 1e-6));
+        px = iw / 2 + ux * k; py = ih / 2 - uy * k; rot = Math.atan2(-uy, ux);
+      }
+      a.className = inView ? 'on at' : 'on';
+      a.style.transform = `translate(${px.toFixed(1)}px,${py.toFixed(1)}px) rotate(${rot.toFixed(3)}rad)`;
+    }
 
     const enc = device.createCommandEncoder();
     // the GPU timer runs from the first pass of the frame (the volume pass when there is one) to the last

@@ -12,6 +12,7 @@ export const flight = {
   tapX: 0, tapY: 0,            // where the last touch tap landed (CSS pixels)
   menu: false,                 // a touch-and-hold menu is open: the finger that opened it does not steer
   thr: 0,                      // the touch throttle strip, -1 (back) .. 1 (forward)
+  sx: 0, sy: 0,                // the touch stick: sideways and up/down thrust, -1 .. 1 each
   cruise: false,               // the strip stays where it is let go (the Hold button), so the flight carries on hands-free
 };
 const keys = new Set(), EDGE = 1.5e9;   // parsecs
@@ -36,8 +37,11 @@ export function initInput(canvas, onAction) {
   // a double tap flies there, a finger held still on something offers to go there.
   const tp = new Map(); let pinch0 = 0, twist = 0, rolling = false, two = false, downT = 0, lastTap = 0, holdTimer = 0, thrId = -1;
   const HOLD_MS = 450, SLOP = 12, STRIP = 76;
-  const looks = () => { const a = []; for (const [id, t] of tp) if (id !== thrId) a.push(t); return a; };
-  const reset = () => { tp.clear(); thrId = -1; two = false; if (!flight.cruise) flight.thr = 0; touchFwd = 0; clearTimeout(holdTimer); };
+  // the stick: a ring near the bottom left corner (centre STICK_X from the left, STICK_Y up from the bottom)
+  const STICK_X = 92, STICK_Y = 118, STICK_R = 46; let stickId = -1;
+  const stick = (t) => { let x = (t.x - STICK_X) / STICK_R, y = (innerHeight - STICK_Y - t.y) / STICK_R; const n = Math.hypot(x, y); if (n > 1) { x /= n; y /= n; } flight.sx = n < 0.14 ? 0 : x; flight.sy = n < 0.14 ? 0 : y; };
+  const looks = () => { const a = []; for (const [id, t] of tp) if (id !== thrId && id !== stickId) a.push(t); return a; };
+  const reset = () => { tp.clear(); thrId = -1; stickId = -1; flight.sx = flight.sy = 0; two = false; if (!flight.cruise) flight.thr = 0; touchFwd = 0; clearTimeout(holdTimer); };
   canvas.addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'touch') return;
     if (e.isPrimary) reset();                         // a first finger: whatever was left over from a lost touch is void
@@ -46,6 +50,7 @@ export function initInput(canvas, onAction) {
     if (flight.menu) { flight.menu = false; onAction('Touch'); }               // any new touch puts the hold menu away
     clearTimeout(holdTimer);
     if (thrId < 0 && e.clientX > innerWidth - STRIP) { thrId = e.pointerId; return; }
+    if (stickId < 0 && Math.hypot(e.clientX - STICK_X, e.clientY - (innerHeight - STICK_Y)) < STICK_R * 1.5) { stickId = e.pointerId; stick(tp.get(e.pointerId)); return; }
     const l = looks();
     downT = performance.now(); two = l.length === 2; pinch0 = 0; rolling = false; touchFwd = 0;
     if (l.length === 1) holdTimer = setTimeout(() => { const t = looks()[0]; if (looks().length === 1 && t && !t.moved) { flight.tapX = t.x; flight.tapY = t.y; onAction('Hold'); } }, HOLD_MS);
@@ -55,6 +60,7 @@ export function initInput(canvas, onAction) {
     const dx = e.clientX - t.x, dy = e.clientY - t.y;
     t.x = e.clientX; t.y = e.clientY;
     if (Math.hypot(t.x - t.x0, t.y - t.y0) > SLOP) t.moved = true;
+    if (e.pointerId === stickId) { stick(t); return; }
     if (e.pointerId === thrId) { const v = Math.max(-1, Math.min(1, t.v0 + (t.y0 - t.y) / (innerHeight * 0.32))); flight.thr = Math.abs(v) < 0.08 ? 0 : v; return; }
     const l = looks();
     if (l.length === 1 && t.moved && !flight.menu) { touchX += dx; touchY += dy; }
@@ -72,6 +78,7 @@ export function initInput(canvas, onAction) {
   const up = (e) => {
     const t = tp.get(e.pointerId); if (!t) return;
     tp.delete(e.pointerId); clearTimeout(holdTimer);
+    if (e.pointerId === stickId) { stickId = -1; flight.sx = flight.sy = 0; return; }
     if (e.pointerId === thrId) { thrId = -1; if (!flight.cruise) flight.thr = 0; return; }
     pinch0 = 0; touchFwd = 0; rolling = false;
     if (!two && !flight.menu && performance.now() - downT < 220 && !t.moved) { const now = performance.now(), dbl = now - lastTap < 380; lastTap = dbl ? 0 : now; flight.tapX = t.x; flight.tapY = t.y; onAction(dbl ? 'DoubleTap' : 'Tap'); }
@@ -111,7 +118,7 @@ export function updateFlight(dt) {
   // touch thrust: the strip is exponential (a tenth of the usual speed at its dead zone, ten times at the end)
   const th = flight.thr || touchFwd, tz = th ? Math.sign(th) * Math.pow(10, 2 * Math.abs(th) - 1) : 0;
   const kz = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0);
-  const mx = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0), my = (keys.has('KeyR') ? 1 : 0) - (keys.has('KeyF') ? 1 : 0), mz = kz + tz;
+  const mx = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0) + flight.sx, my = (keys.has('KeyR') ? 1 : 0) - (keys.has('KeyF') ? 1 : 0) + flight.sy, mz = kz + tz;
   // the keys take the controls back from a fly-to; the touch throttle only sets its pace
   if (go.on && (mx || my || kz)) cancelGoto();
   if (go.on) {
