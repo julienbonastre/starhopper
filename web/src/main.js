@@ -16,6 +16,7 @@ import { initBeyond } from './beyond.js';
 import { initWeb } from './web.js';
 import { setSound, setVolume, setEngine, updateSound, level } from './audio.js';
 import { PLANETS, orbitPoints, jdNow } from './solar.js';
+import { retarget } from './flight.js';
 
 const body = document.body, canvas = $('c');
 const params = new URLSearchParams(location.search);
@@ -48,7 +49,7 @@ async function main() {
     $('ver').append(' \u00b7 ', a);
   }).catch(() => {});
   // a pull request's preview build says so, so that nobody takes it for the live site
-  if (PREVIEW) { const b = document.createElement('div'); b.textContent = 'Preview of pull request #' + PREVIEW; b.style.cssText = 'position:fixed;left:50%;top:6px;transform:translateX(-50%);white-space:nowrap;z-index:9;padding:4px 9px;border-radius:999px;background:#c8102e;color:#fff;font:600 11px system-ui;letter-spacing:.04em;pointer-events:none'; document.body.append(b); }
+  if (PREVIEW) { const b = document.createElement('div'); b.textContent = 'Preview of pull request #' + PREVIEW; b.style.cssText = 'position:fixed;left:50%;top:50px;transform:translateX(-50%);white-space:nowrap;z-index:9;padding:4px 9px;border-radius:999px;background:#c8102e;color:#fff;font:600 11px system-ui;letter-spacing:.04em;pointer-events:none'; document.body.append(b); }
   say('Reading the star and galaxy indexes', 0.3);
   const [stars, galPts, gal] = await Promise.all([
     initPoints(gpu, globalsBuf, base + 'stars/', quality, { budget: quality.starBudget, track: true, magOff: 20, sigma0: 0.62 }),
@@ -97,16 +98,17 @@ async function main() {
   const lines = initLines(gpu, globalsBuf, 8192), labels = initLabels(gpu, globalsBuf, () => pxScale);
   const LG_CON = 0, LG_ORBIT = 1;
   gal.names.forEach((n, i) => { if (n[1]) labels.add(n[0], 'galaxy', gal.pos(i, 0), gal.pos(i, 1), gal.pos(i, 2), gal.absmag(i), Infinity, gal.radius(i) * 1.2, 0, gal.radius(i)); });
+  const bodyLabel = [], bodyRow = [];
   // planets: orbit lines (the ellipse each is on today) and names
   {
     const NP = 160, op = new Float64Array(NP * 3);
     PLANETS.forEach((pl, i) => {
       orbitPoints(i, NP, op, jd);
       for (let k = 0; k < NP; k++) { const a = k * 3, b = ((k + 1) % NP) * 3; lines.add(op[a], op[a + 1], op[a + 2], op[b], op[b + 1], op[b + 2], 0.10, 0.13, 0.20, 0.5, LG_ORBIT); }
-      labels.add(pl.name, 'body', bodies.pos(i + 1, 0), bodies.pos(i + 1, 1), bodies.pos(i + 1, 2), NaN, 0.004, bodies.radius(i + 1) * 2.5, -10, bodies.radius(i + 1));
+      bodyLabel[i + 1] = labels.add(pl.name, 'body', bodies.pos(i + 1, 0), bodies.pos(i + 1, 1), bodies.pos(i + 1, 2), NaN, 0.004, bodies.radius(i + 1) * 2.5, -10, bodies.radius(i + 1));
     });
     const mn = bodies.count - 1;   // the Moon: named out to a few million kilometres
-    labels.add('Moon', 'body', bodies.pos(mn, 0), bodies.pos(mn, 1), bodies.pos(mn, 2), NaN, 2e-7, bodies.radius(mn) * 2.5, -10, bodies.radius(mn));
+    bodyLabel[mn] = labels.add('Moon', 'body', bodies.pos(mn, 0), bodies.pos(mn, 1), bodies.pos(mn, 2), NaN, 2e-7, bodies.radius(mn) * 2.5, -10, bodies.radius(mn));
   }
   labels.occluder(bodies.hides);
   place(0, bodies.night());
@@ -131,6 +133,7 @@ async function main() {
     if (code === 'KeyH') { showPerf = !showPerf; $('perf').hidden = !showPerf; }
     else if (code === 'Home' || code === 'Digit0') flyTo(bodies.pos(3, 0), bodies.pos(3, 1), bodies.pos(3, 2), bodies.radius(3) * 4, 6);
     else if (code === 'KeyO') { setLock(!flight.lock); if (target.on) flash(flight.lock ? 'Locked on to ' + target.name : 'Lock released'); }
+    else if (code === 'Comma') setRate(rateI - 1); else if (code === 'Period') setRate(rateI + 1); else if (code === 'KeyT') setRate(rateI === PAUSE ? lastRun : PAUSE);
     else if (code === 'KeyG') { if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } }
     else if (code === 'Touch') $('ctx').hidden = true;
     else if (code === 'Tap' || code === 'DoubleTap' || code === 'Hold') {
@@ -173,7 +176,7 @@ async function main() {
   // rows: search key, shown name, position, where a fly-to stops, absolute magnitude, kind (0 star, 1 galaxy, 2 planet, 3 nebula or cluster), radius
   const index = [];
   gal.names.forEach((n, i) => index.push([n[0].toLowerCase(), n[0], gal.pos(i, 0), gal.pos(i, 1), gal.pos(i, 2), gal.radius(i) * 3.2, gal.absmag(i), 1, gal.radius(i)]));
-  for (let i = 1; i < bodies.count; i++) index.push([bodies.names[i].toLowerCase(), bodies.names[i], bodies.pos(i, 0), bodies.pos(i, 1), bodies.pos(i, 2), bodies.radius(i) * 4, -99, 2, bodies.radius(i)]);
+  for (let i = 1; i < bodies.count; i++) index.push(bodyRow[i] = [bodies.names[i].toLowerCase(), bodies.names[i], bodies.pos(i, 0), bodies.pos(i, 1), bodies.pos(i, 2), bodies.radius(i) * 4, -99, 2, bodies.radius(i)]);
   // target whatever lies closest to a view ray (unit vector), among the things bright enough to be on screen
   let curMag = 6, curGal = 12;
   function pick(dx, dy, dz) {
@@ -289,6 +292,27 @@ async function main() {
   // the bar under a target: go there (or stop going there), or let it go
   $('tbgo').onclick = () => { if (flight.goto) cancelGoto(); else if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } };
   $('tblk').onclick = () => { setLock(!flight.lock); flash(flight.lock ? 'Locked on to ' + target.name : 'Lock released'); };
+  // The clock. It starts at the present, running at the true rate; the buttons step through faster rates (and
+  // backwards), pause it, or bring it back to now. Only the Sun's family moves: the stars are too far to show it.
+  const RATES = [-31557600, -2592000, -86400, -3600, 0, 1, 60, 3600, 86400, 2592000, 31557600];   // seconds of the clock per second
+  const RATE_NAME = ['\u22121 year/s', '\u22121 month/s', '\u22121 day/s', '\u22121 hour/s', 'paused', 'real time', '1 min/s', '1 hour/s', '1 day/s', '1 month/s', '1 year/s'], PAUSE = 4;
+  let simJd = jd, rateI = 5, lastRun = 5, clockShown = '';
+  function setRate(i) { rateI = Math.max(0, Math.min(RATES.length - 1, i)); if (rateI !== PAUSE) lastRun = rateI; $('tcr').textContent = RATE_NAME[rateI]; $('tcp').innerHTML = rateI === PAUSE ? '&#9654;' : '&#10074;&#10074;'; }
+  $('tcs').onclick = () => setRate(rateI - 1); $('tcf').onclick = () => setRate(rateI + 1); $('tcp').onclick = () => setRate(rateI === PAUSE ? lastRun : PAUSE);
+  $('tcn').onclick = () => { simJd = jdNow(); setRate(5); };
+  setRate(5);
+  function tick(dt) {
+    if (rateI === PAUSE || state.frozen) return;
+    simJd += dt * RATES[rateI] / 86400;
+    bodies.setTime(simJd);
+    for (let i = 1; i < bodies.count; i++) {
+      const x = bodies.pos(i, 0), y = bodies.pos(i, 1), z = bodies.pos(i, 2), r = bodyRow[i];
+      r[2] = x; r[3] = y; r[4] = z; const lb = labels.items[bodyLabel[i]]; lb.x = x; lb.y = y; lb.z = z;
+      if (target.on && target.row === r) { target.x = x; target.y = y; target.z = z; const tl = labels.items[tgtLabel]; tl.x = x; tl.y = y; tl.z = z; if (flight.goto) retarget(x, y, z); }
+    }
+    const d = new Date((simJd - 2440587.5) * 86400000), text = isFinite(d) ? d.toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
+    if (text !== clockShown) $('tcd').textContent = clockShown = text;
+  }
   $('tbx').onclick = () => { cancelGoto(); pick(0, 0, 0); };
   $('ctxno').onclick = () => { $('ctx').hidden = true; flight.menu = false; };
   $('svb').onclick = save;
@@ -396,6 +420,7 @@ async function main() {
     }
     if (flight.sx !== joyX || flight.sy !== joyY) { joyX = flight.sx; joyY = flight.sy; const k = $('joyk'); k.style.transform = `translate(${(joyX * 26).toFixed(1)}px,${(-joyY * 26).toFixed(1)}px)`; k.className = joyX || joyY ? 'on' : ''; }
     if (flight.thr !== thrShown) { thrShown = flight.thr; const k = $('thrk'); k.style.transform = `translateY(${(-thrShown * innerHeight * 0.32).toFixed(1)}px)`; k.className = thrShown ? 'on' : ''; }
+    tick(dt);
     bodies.update();
 
     // how far outside the nearest galaxy's disc the camera is, in units that make 0..1 "inside" (see adaptation below)

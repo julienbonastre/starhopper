@@ -32,7 +32,7 @@ Measured, from catalogues pinned by checksum:
 
 - **Stars**: AT-HYG 4.0, 2.53 million stars with distances (Hipparcos, Tycho-2, Gaia), magnitudes and colours.
 - **Constellations and star names**: Stellarium's modern sky culture. The figures are drawn between the stars' real 3D positions, so they distort as you leave the Sun.
-- **Sun, planets and Moon**: JPL's approximate Keplerian elements for the planets and the Astronomical Almanac's low-precision series for the Moon, at today's date. All at true size and distance, so from the Earth the planets are points of light: search for one by name to fly to it.
+- **Sun, planets and Moon**: JPL's approximate Keplerian elements for the planets and the Astronomical Almanac's low-precision series for the Moon, at today's date. All at true size and distance, so from the Earth the planets are points of light: search for one by name to fly to it. A clock at the top runs them: real time by default, up to a year a second either way (`,` and `.`), pause (`T`), or back to now. The planets and Moon move along their orbits and turn at their true rates, and a camera near one is carried along with it. The orbit lines are drawn once, for the date the page opened.
 - **Nebulae and clusters**: OpenNGC, with distances from Harris (globulars), Hunt & Reffert (Gaia clusters), Gaia-based planetary nebula and supernova remnant catalogues, molecular cloud distances and SIMBAD.
 - **Galaxies**: GLADE 2.3 as points out to 268 Mpc; 10,900 OpenNGC and Local Volume galaxies with size, tilt and Hubble type, with distances from the Updated Nearby Galaxy Catalog and Cosmicflows-3 where they exist.
 - **Exoplanet hosts**: NASA Exoplanet Archive, 4,520 stars.

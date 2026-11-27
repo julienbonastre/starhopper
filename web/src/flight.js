@@ -116,6 +116,8 @@ export function flyTo(x, y, z, stop, dur = 7, q1 = null) {
   if (q1) go.q1.set(q1); else if (go.d0 > stop * 1.0001) lookQuat(go.q1, dx, dy, dz, cam.up[0], cam.up[1], cam.up[2]); else go.q1.set(cam.q);
   flight.goto = go;
 }
+// the place a fly-to is heading for has moved (a planet, with the clock running)
+export const retarget = (x, y, z) => { go.to[0] = x; go.to[1] = y; go.to[2] = z; };
 export const cancelGoto = () => { go.on = false; flight.goto = null; };
 
 const ease = (t) => t * t * t * (t * (6 * t - 15) + 10);

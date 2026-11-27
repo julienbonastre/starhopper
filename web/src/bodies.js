@@ -194,16 +194,23 @@ struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
 export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
   const { device, queue } = gpu;
   const BODY = [SUN, ...PLANETS, MOON], NB = BODY.length, F = 20, EARTH = 3, LUNA = NB - 1;
-  // heliocentric positions for the date (fixed for the session: the planets move far too slowly to see)
-  const pos = new Float64Array(NB * 3), radius = new Float64Array(NB), tmp = new Float64Array(3);
-  radius[0] = SUN.radius * KM_PC;
-  PLANETS.forEach((p, i) => { planetPos(i, jd, tmp); pos.set(tmp, (i + 1) * 3); radius[i + 1] = p.radius * KM_PC; });
-  // the Moon, around the Earth
-  moonPos(jd, tmp); for (let a = 0; a < 3; a++) pos[LUNA * 3 + a] = pos[EARTH * 3 + a] + tmp[a]; radius[LUNA] = MOON.radius * KM_PC;
-  // which way each body faces: north pole and prime meridian angle (fixed for the session, like the positions)
+  // heliocentric positions, and which way each body faces (north pole and prime meridian angle), for a date
+  const pos = new Float64Array(NB * 3), radius = new Float64Array(NB), tmp = new Float64Array(4);
   const frame = new Float64Array(NB * 4); frame[2] = 1;
-  for (let i = 1; i < NB; i++) frame.set(bodyFrame(BODY[i].name, jd, [0, 0, 0, 0]), i * 4);
-  const spin = frame[EARTH * 4 + 3] + Math.PI / 2;                         // Greenwich sidereal angle
+  radius[0] = SUN.radius * KM_PC; PLANETS.forEach((p, i) => { radius[i + 1] = p.radius * KM_PC; }); radius[LUNA] = MOON.radius * KM_PC;
+  function place(t) {
+    for (let i = 0; i < PLANETS.length; i++) { planetPos(i, t, tmp); pos[(i + 1) * 3] = tmp[0]; pos[(i + 1) * 3 + 1] = tmp[1]; pos[(i + 1) * 3 + 2] = tmp[2]; }
+    moonPos(t, tmp); for (let a = 0; a < 3; a++) pos[LUNA * 3 + a] = pos[EARTH * 3 + a] + tmp[a];   // the Moon, around the Earth
+    for (let i = 1; i < NB; i++) { bodyFrame(BODY[i].name, t, tmp); frame[i * 4] = tmp[0]; frame[i * 4 + 1] = tmp[1]; frame[i * 4 + 2] = tmp[2]; frame[i * 4 + 3] = tmp[3]; }
+  }
+  place(jd);
+  // Move everything to another date. A camera close to a body is carried along with it (not turned with it), so
+  // that running the clock fast shows the planet spin and its moon go round instead of leaving it behind.
+  function setTime(t) {
+    const i = near.id, ride = i > 0 && near.alt < radius[i] * 300, ox = pos[i * 3], oy = pos[i * 3 + 1], oz = pos[i * 3 + 2];
+    place(t);
+    if (ride) { cam.p[0] += pos[i * 3] - ox; cam.p[1] += pos[i * 3 + 1] - oy; cam.p[2] += pos[i * 3 + 2] - oz; }
+  }
   const names = BODY.map((p) => p.name);
 
   const module = device.createShaderModule({ code: SHADER });
@@ -322,7 +329,7 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
     const u = [-ex / ds, -ey / ds, -ez / ds];                              // to the Sun
     let S = null, best = -2;
     for (const [lon, lat] of SITES) {
-      const a = spin + lon * Math.PI / 180, b = lat * Math.PI / 180, v = [Math.cos(b) * Math.cos(a), Math.cos(b) * Math.sin(a), Math.sin(b)];
+      const a = frame[EARTH * 4 + 3] + Math.PI / 2 + lon * Math.PI / 180, b = lat * Math.PI / 180, v = [Math.cos(b) * Math.cos(a), Math.cos(b) * Math.sin(a), Math.sin(b)];
       const lit = v[0] * u[0] + v[1] * u[1] + v[2] * u[2];
       // the first site in good daylight wins; failing that, the best lit
       if (best < 0.6 && lit > best) { best = lit; S = v; }
@@ -349,5 +356,5 @@ export function initBodies(gpu, globalsBuf, base, jd, noise, texWidth = 0) {
     const R = radius[EARTH] * 1.6, p = [pos[e] + v[0] * R, pos[e + 1] + v[1] * R, pos[e + 2] + v[2] * R];
     return { p, at: [p[0] + v[0], p[1] + v[1], p[2] + v[2]], up: [0, 0, 1] };
   }
-  return { update, draw, near, launch, night, hides, names, count: NB, pos: (i, a) => pos[i * 3 + a], radius: (i) => radius[i], AU: 1 / PC_AU };
+  return { update, draw, near, setTime, launch, night, hides, names, count: NB, pos: (i, a) => pos[i * 3 + a], radius: (i) => radius[i], AU: 1 / PC_AU };
 }
