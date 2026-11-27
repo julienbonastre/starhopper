@@ -1,0 +1,151 @@
+{
+ "size": [
+  1920,
+  1080
+ ],
+ "adapter": {
+  "vendor": "apple",
+  "architecture": "metal-3",
+  "fallback": false
+ },
+ "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.0.0 Safari/537.36",
+ "poses": [
+  {
+   "n": 1,
+   "name": "Earth night sky",
+   "file": "pose_1.png",
+   "stars": 533634,
+   "galaxies": 111748,
+   "perf": {
+    "fps": 60,
+    "gpuMs": 9.19,
+    "cpuMs": 0.71,
+    "size": [
+     1920,
+     1080
+    ],
+    "scale": 1
+   }
+  },
+  {
+   "n": 2,
+   "name": "Leaving the Solar System",
+   "file": "pose_2.png",
+   "stars": 388910,
+   "galaxies": 111748,
+   "perf": {
+    "fps": 60,
+    "gpuMs": 9.51,
+    "cpuMs": 0.43,
+    "size": [
+     1920,
+     1080
+    ],
+    "scale": 1
+   }
+  },
+  {
+   "n": 3,
+   "name": "Among the Pleiades",
+   "file": "pose_3.png",
+   "stars": 530278,
+   "galaxies": 111748,
+   "perf": {
+    "fps": 60,
+    "gpuMs": 9.54,
+    "cpuMs": 0.78,
+    "size": [
+     1920,
+     1080
+    ],
+    "scale": 1
+   }
+  },
+  {
+   "n": 4,
+   "name": "Inside the Orion nebula",
+   "file": "pose_4.png",
+   "stars": 450080,
+   "galaxies": 111748,
+   "perf": {
+    "fps": 60,
+    "gpuMs": 8.66,
+    "cpuMs": 0.67,
+    "size": [
+     1920,
+     1080
+    ],
+    "scale": 1
+   }
+  },
+  {
+   "n": 5,
+   "name": "Above the galactic disc",
+   "file": "pose_5.png",
+   "stars": 16384,
+   "galaxies": 111748,
+   "perf": {
+    "fps": 60,
+    "gpuMs": 6.78,
+    "cpuMs": 0.37,
+    "size": [
+     1920,
+     1080
+    ],
+    "scale": 1
+   }
+  },
+  {
+   "n": 6,
+   "name": "Approaching Andromeda",
+   "file": "pose_6.png",
+   "stars": 0,
+   "galaxies": 111748,
+   "perf": {
+    "fps": 60,
+    "gpuMs": 3.65,
+    "cpuMs": 0.26,
+    "size": [
+     1920,
+     1080
+    ],
+    "scale": 1
+   }
+  },
+  {
+   "n": 7,
+   "name": "The Local Group",
+   "file": "pose_7.png",
+   "stars": 0,
+   "galaxies": 111748,
+   "perf": {
+    "fps": 60,
+    "gpuMs": 1.54,
+    "cpuMs": 0.29,
+    "size": [
+     1920,
+     1080
+    ],
+    "scale": 1
+   }
+  },
+  {
+   "n": 8,
+   "name": "The cosmic web",
+   "file": "pose_8.png",
+   "stars": 0,
+   "galaxies": 160252,
+   "perf": {
+    "fps": 60,
+    "gpuMs": 1.9,
+    "cpuMs": 0.34,
+    "size": [
+     1920,
+     1080
+    ],
+    "scale": 1
+   }
+  }
+ ],
+ "console": []
+}
