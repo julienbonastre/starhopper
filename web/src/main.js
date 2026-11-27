@@ -1,7 +1,7 @@
 // Starhopper: start-up, the frame loop and the HUD
 import { $, initGpu, GLOBALS_SIZE } from './gpu.js';
 import { cam, basis, lookQuat, PC_LY, PC_AU, C_PC_S } from './camera.js';
-import { flight, initInput, updateFlight, flyTo } from './flight.js';
+import { flight, initInput, updateFlight, flyTo, cancelGoto } from './flight.js';
 import { quality, LEVEL, keep } from './quality.js';
 import { initPoints } from './points.js';
 import { initGalaxies } from './galaxies.js';
@@ -99,9 +99,12 @@ async function main() {
   }
   labels.occluder(bodies.hides);
   place(0, bodies.night());
-  const show = { lines: true, names: true, proc: true };
-  const labelLimit = { star: 0, con: 0, body: 0, deep: 0, galaxy: 0 };
-  const kindGain = { star: 1, con: 1, body: 1, deep: 1, galaxy: 1 };
+  // the picture comes first: figures and names are off until asked for
+  const show = { lines: false, names: false, proc: true, sound: false };
+  const labelLimit = { star: 0, con: 0, body: 0, deep: 0, galaxy: 0, target: 99 };
+  const kindGain = { star: 1, con: 1, body: 1, deep: 1, galaxy: 1, target: 1 };
+  const tgtLabel = labels.add('', 'target', 0, 0, 0, NaN, 0, 0, -100);   // the target marker: hidden (maxDist 0) until something is picked
+  const target = { on: false, x: 0, y: 0, z: 0, stop: 0, name: '' };
 
   // start at Earth's distance from the Sun, facing Orion with celestial north up
   if (params.has('pose')) setPose(+params.get('pose') - 1);
@@ -114,7 +117,14 @@ async function main() {
 
   initInput(canvas, (code) => {
     if (code === 'KeyH') { showPerf = !showPerf; $('perf').hidden = !showPerf; }
-    else if (code === 'Home') flyTo(0, 0, 0, 1.2 / PC_AU, 6);
+    else if (code === 'Home') flyTo(bodies.pos(3, 0), bodies.pos(3, 1), bodies.pos(3, 2), bodies.radius(3) * 4, 6);
+    else if (code === 'KeyG') { if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } }
+    else if (code === 'Tap' || code === 'DoubleTap') {
+      const nx = flight.tapX / innerWidth * 2 - 1, ny = 1 - flight.tapY / innerHeight * 2, f = 1 / Math.tan(cam.fov / 2), asp = innerWidth / innerHeight;
+      let dx = cam.right[0] * nx * asp / f + cam.up[0] * ny / f + cam.fwd[0], dy = cam.right[1] * nx * asp / f + cam.up[1] * ny / f + cam.fwd[1], dz = cam.right[2] * nx * asp / f + cam.up[2] * ny / f + cam.fwd[2];
+      const n = Math.hypot(dx, dy, dz); pick(dx / n, dy / n, dz / n);
+      if (code === 'DoubleTap' && target.on) flyTo(target.x, target.y, target.z, target.stop, 9);
+    }
     else if (code === 'BracketRight') exposureBase = Math.min(4000, exposureBase * 1.25);
     else if (code === 'BracketLeft') exposureBase = Math.max(0.5, exposureBase / 1.25);
     else if (code === 'Equal') flight.throttle = Math.min(4, flight.throttle + 0.25);
@@ -131,9 +141,29 @@ async function main() {
   document.querySelectorAll('#tg button').forEach((b) => { b.onclick = () => { show[b.dataset.k] = !show[b.dataset.k]; b.classList.toggle('on', show[b.dataset.k]); }; });
   const syncToggles = () => document.querySelectorAll('#tg button').forEach((b) => b.classList.toggle('on', show[b.dataset.k]));
   // search: every named star and galaxy; Enter flies to the best match, stopping a comfortable distance short
+  // rows: search key, shown name, position, where a fly-to stops, absolute magnitude, kind (0 star, 1 galaxy, 2 planet), radius
   const index = [];
-  for (const s of names.stars) { if (s[0]) index.push([s[0].toLowerCase(), s[0], s[2], s[3], s[4], 0.0004]); if (s[1]) index.push([s[1].toLowerCase(), s[0] || s[1], s[2], s[3], s[4], 0.0004]); }
-  gal.names.forEach((n, i) => index.push([n[0].toLowerCase(), n[0], gal.pos(i, 0), gal.pos(i, 1), gal.pos(i, 2), gal.radius(i) * 3.2]));
+  for (const s of names.stars) { if (s[0]) index.push([s[0].toLowerCase(), s[0], s[2], s[3], s[4], 0.0004, s[5], 0, 0]); if (s[1]) index.push([s[1].toLowerCase(), s[0] || s[1], s[2], s[3], s[4], 0.0004, s[5], 0, 0]); }
+  gal.names.forEach((n, i) => index.push([n[0].toLowerCase(), n[0], gal.pos(i, 0), gal.pos(i, 1), gal.pos(i, 2), gal.radius(i) * 3.2, gal.absmag(i), 1, gal.radius(i)]));
+  for (let i = 1; i < bodies.count; i++) index.push([bodies.names[i].toLowerCase(), bodies.names[i], bodies.pos(i, 0), bodies.pos(i, 1), bodies.pos(i, 2), bodies.radius(i) * 4, -99, 2, bodies.radius(i)]);
+  // target whatever lies closest to a view ray (unit vector), among the things bright enough to be on screen
+  let curMag = 6, curGal = 12;
+  function pick(dx, dy, dz) {
+    let best = -1, bs = 0.038;                                   // within about two degrees, or inside the object's disc
+    for (let i = 0; i < index.length; i++) {
+      const r = index[i], x = r[2] - cam.p[0], y = r[3] - cam.p[1], z = r[4] - cam.p[2], d = Math.sqrt(x * x + y * y + z * z);
+      if (d < r[8] * 1.5 || d < 1e-12) continue;
+      if (r[6] + 5 * Math.log10(d / 10) > (r[7] === 1 ? curGal + 1 : curMag + 0.5)) continue;
+      const c = (x * dx + y * dy + z * dz) / d; if (c < 0.99) continue;
+      const sc = Math.acos(Math.min(1, c)) - Math.min(r[8] / d * 0.7, 0.2);
+      if (sc < bs) { bs = sc; best = i; }
+    }
+    if (best < 0) { target.on = false; labels.items[tgtLabel].maxDist = 0; $('htr').hidden = true; return; }
+    const r = index[best];
+    target.on = true; target.x = r[2]; target.y = r[3]; target.z = r[4]; target.stop = r[5]; target.name = r[1];
+    labels.move(tgtLabel, '\u25C7 ' + r[1], r[2], r[3], r[4], r[8]); labels.items[tgtLabel].maxDist = Infinity; labelT = 1;
+    $('htr').hidden = false; flash(r[1]);
+  }
   $('find').addEventListener('keydown', (e) => {
     e.stopPropagation();
     if (e.key !== 'Enter') return;
@@ -147,7 +177,29 @@ async function main() {
   }).catch(() => {});
   const launch = () => { body.classList.add('fly'); canvas.requestPointerLock?.()?.catch?.(() => {}); };
   $('go').onclick = launch;
-  canvas.onclick = () => { if (body.classList.contains('fly') && !flight.locked) canvas.requestPointerLock?.()?.catch?.(() => {}); };
+  // a click looks at what is dead ahead (the pointer is locked to the view) and targets it
+  canvas.onclick = () => { if (!body.classList.contains('fly')) return; if (flight.locked) pick(cam.fwd[0], cam.fwd[1], cam.fwd[2]); else canvas.requestPointerLock?.()?.catch?.(() => {}); };
+  // viewpoints and save points (kept in this browser only)
+  POSES.forEach((p, i) => { const b = document.createElement('button'); b.textContent = p.name; b.onclick = () => { cancelGoto(); setPose(i); state.snap = 1; launch(); flash(p.name); }; $('vp').append(b); });
+  let saves = []; try { saves = JSON.parse(localStorage.starhopperSaves || '[]'); } catch {}
+  const drawSaves = () => {
+    $('svl').textContent = '';
+    saves.forEach((s, i) => {
+      const w = document.createElement('span'), go = document.createElement('button'), del = document.createElement('button');
+      go.textContent = s.n; del.textContent = '\u00d7'; del.title = 'Forget this place';
+      go.onclick = () => { cancelGoto(); flight.vel.fill(0); cam.p.set(s.p); cam.q.set(s.q); basis(); state.snap = 1; launch(); flash(s.n); };
+      del.onclick = () => { saves.splice(i, 1); keep('starhopperSaves', JSON.stringify(saves)); drawSaves(); };
+      w.append(go, del); $('svl').append(w);
+    });
+  };
+  const save = () => {
+    const n = $('svn').value.trim() || ($('hn').textContent.replace(/\s\s.*/, '') || $('scale').textContent || 'Somewhere') + ' ' + (saves.length + 1);
+    saves.push({ n: n.slice(0, 40), p: [cam.p[0], cam.p[1], cam.p[2]], q: [cam.q[0], cam.q[1], cam.q[2], cam.q[3]] });
+    keep('starhopperSaves', JSON.stringify(saves)); $('svn').value = ''; drawSaves(); $('s').textContent = 'Saved: ' + n;
+  };
+  $('svb').onclick = save;
+  $('svn').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') save(); });
+  drawSaves();
   $('menu').onclick = () => body.classList.remove('fly');
 
   const fmtDist = (pc) => {
@@ -173,7 +225,7 @@ async function main() {
   let gpuMs = 0, frameMs = 8, bench = null, scaleT = 0, period = 1 / 30, dtK = 0, winN = 0, winLate = 0, holdT = 0, hold = 6, calm = 0;
   let last = performance.now(), time = 0, frames = 0, fpsT = 0, fps = 0, cpuMs = 0;
   const dts = new Float32Array(128), dtSort = new Float32Array(128);
-  let busy = false, conFade = 1, nameFade = 1, labelT = 1, pointGain = 1, procFade = 1;
+  let busy = false, conFade = 0, nameFade = 0, labelT = 1, pointGain = 1, procFade = 1;
   const DIFFUSE = 20;   // extended light is lifted relative to point sources, as dark-adapted eyes do
   const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   function frame(now) {
@@ -225,6 +277,7 @@ async function main() {
     procFade += ((show.proc ? 1 : 0) - procFade) * (1 - Math.exp(-dt * 5));
     const magLimit = Math.min(magCap, -2.5 * Math.log10(E_THRESH / (exposure * starGain)) + quality.magBias);
     const galLimit = -2.5 * Math.log10(E_THRESH * 2.6 / (exposure * pointGain)) + quality.magBias;
+    curMag = magLimit; curGal = galLimit;
     stars.update(magLimit);
     galPts.update(galLimit);
     gal.update(W, H, pxScale, pointGain, starGain);
@@ -310,6 +363,7 @@ async function main() {
       const fromMW = gal.near.id === 0 ? 0 : Math.hypot(cam.p[0] - gal.pos(0, 0), cam.p[1] - gal.pos(0, 1), cam.p[2] - gal.pos(0, 2));
       $('scale').textContent = fromSol < 0.01 ? 'Solar System' : fromSol < 1500 ? 'Stellar neighbourhood' : fromMW < 60000 ? 'Milky Way' : fromMW < 1.6e6 ? 'Local Group' : 'Cosmic web';
       $('hn').textContent = bn.alt < 2e-6 ? bodies.names[bn.id] + '  ' + fmtDist(bn.alt) : n.dist < 30 ? fmtDist(n.dist) : gn.id >= 0 ? gal.names[gn.id][0] + '  ' + fmtDist(gn.dist) : '';
+      if (target.on) { const td = Math.hypot(target.x - cam.p[0], target.y - cam.p[1], target.z - cam.p[2]); $('ht').textContent = target.name + '  ' + fmtDist(td); }
       if (showPerf) { const s = stars.stats(), g2 = galPts.stats(); $('perf').textContent = `${fps.toFixed(0)} fps  gpu ${gpuMs.toFixed(2)} ms  cpu ${cpuMs.toFixed(2)} ms\n${W}x${H}  scale ${resScale.toFixed(2)}\n${s.drawn.toLocaleString()} stars in ${s.tiles} tiles\n${s.loaded.toLocaleString()} loaded, ${s.pending} pending\nexposure ${exposure.toPrecision(3)}  mag ${magLimit.toFixed(1)} / ${galLimit.toFixed(1)}\n${g2.drawn.toLocaleString()} galaxies`; }
     }
   }
@@ -332,6 +386,6 @@ async function main() {
     const budget = period * 1000;
     return { frameMs: stat(b.frame), gpuMs: stat(b.gpu), late: b.frame.filter((x) => x > budget * 1.6).length, gpuOver: b.gpu.filter((x) => x > 8.3).length, size: [W, H], scale: resScale, level: LEVEL, mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null };
   };
-  window.SH = { bodies, bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
+  window.SH = { bodies, pick, target, labels, bench: runBench, perf: () => ({ fps: +fps.toFixed(1), gpuMs: +gpuMs.toFixed(2), cpuMs: +cpuMs.toFixed(2), size: [W, H], scale: resScale }), frames: () => state.frames, dbg: () => ({ exposure, pointGain, procFade, W, H, pxScale }), settle: () => { state.snap = 1; }, gal, galPts, POSES, setPose, show, cam, flight, stars, state, flyTo, lookQuat, basis, ready: true, capture, setExposure: (e) => { exposureBase = exposure = e; } };
 }
 main().catch((e) => { console.error(e); body.className = 'l e'; $('s').textContent = (e.cause ? '' : 'Failed to start: ') + e.message; });

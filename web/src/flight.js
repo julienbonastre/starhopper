@@ -9,6 +9,7 @@ export const flight = {
   context: 1,                  // distance to the nearest thing, pc (set by main each frame)
   goto: null,                  // active fly-to
   locked: false,
+  tapX: 0, tapY: 0,            // where the last touch tap landed (CSS pixels)
 };
 const keys = new Set();
 let lookX = 0, lookY = 0, touch = new Map();
@@ -28,7 +29,7 @@ export function initInput(canvas, onAction) {
   addEventListener('mousemove', (e) => { if (flight.locked) { lookX += e.movementX; lookY += e.movementY; } });
   // touch: one finger flies forward and steers by how far it has slid from where it went down; a second finger
   // pinches the throttle. A quick tap is passed on as an action.
-  const tp = new Map(); let pinch = 0, downT = 0;
+  const tp = new Map(); let pinch = 0, downT = 0, lastTap = 0;
   canvas.addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'touch') return;
     canvas.setPointerCapture(e.pointerId); tp.set(e.pointerId, { x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY }); downT = performance.now(); pinch = 0;
@@ -38,7 +39,7 @@ export function initInput(canvas, onAction) {
     t.x = e.clientX; t.y = e.clientY;
     if (tp.size === 2) { const [a, b] = [...tp.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch) flight.throttle = Math.max(-3, Math.min(4, flight.throttle + Math.log10(d / pinch) * 2.5)); pinch = d; }
   });
-  const up = (e) => { const t = tp.get(e.pointerId); if (!t) return; tp.delete(e.pointerId); pinch = 0; if (performance.now() - downT < 220 && Math.hypot(t.x - t.x0, t.y - t.y0) < 12) onAction('Tap'); };
+  const up = (e) => { const t = tp.get(e.pointerId); if (!t) return; tp.delete(e.pointerId); pinch = 0; if (performance.now() - downT < 220 && Math.hypot(t.x - t.x0, t.y - t.y0) < 12) { const now = performance.now(), dbl = now - lastTap < 380; lastTap = dbl ? 0 : now; flight.tapX = t.x; flight.tapY = t.y; onAction(dbl ? 'DoubleTap' : 'Tap'); } };
   canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
   touch = tp;
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); flight.throttle = Math.max(-3, Math.min(4, flight.throttle - Math.sign(e.deltaY) * 0.1)); }, { passive: false });

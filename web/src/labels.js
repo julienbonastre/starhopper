@@ -28,6 +28,7 @@ export const KIND = {
   con: { font: '500 10.5px', colour: [0.45, 0.60, 0.95], dx: 0, dy: -8, upper: true, spacing: '0.22em', centre: true },
   body: { font: '500 12px', colour: [1.0, 0.92, 0.78], dx: 0, dy: 15, upper: false, spacing: '0.02em', centre: true },
   deep: { font: '500 11.5px', colour: [0.86, 0.80, 1.0], dx: 10, dy: -9, upper: false, spacing: '0.03em' },
+  target: { font: '600 12px', colour: [0.62, 0.86, 1.0], dx: 0, dy: 15, upper: false, spacing: '0.04em', centre: true },
   galaxy: { font: '500 11.5px', colour: [0.98, 0.84, 0.88], dx: 0, dy: 16, upper: false, spacing: '0.03em', centre: true },
 };
 
@@ -61,6 +62,11 @@ export function initLabels(gpu, globalsBuf, getScale) {
   function add(text, kind, x, y, z, absmag, maxDist = Infinity, minDist = 0, rank = 0, radius = 0) {
     items.push({ rank, radius, text: KIND[kind].upper ? text.toUpperCase() : text, kind, x, y, z, absmag, maxDist, minDist, slot: -1, sx: 0, sy: 0, vis: 0 });
     return items.length - 1;
+  }
+  // repoint an existing label (the target marker): new text and place; its slot is repainted when it next shows
+  function move(i, text, x, y, z, radius) {
+    const it = items[i]; it.text = text; it.x = x; it.y = y; it.z = z; it.radius = radius;
+    if (it.slot >= 0) paint(it.slot, it);
   }
   function paint(slot, it) {
     const k = KIND[it.kind], x = (slot % COLS) * SW * scale, y = Math.floor(slot / COLS) * SH * scale;
@@ -144,5 +150,5 @@ export function initLabels(gpu, globalsBuf, getScale) {
     if (live) queue.writeBuffer(buf, 0, out, 0, live * 12);
   }
   function draw(pass) { if (!live) return; pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.setVertexBuffer(0, buf); pass.draw(4, live); }
-  return { add, choose, update, draw, items, occluder: (f) => { hidden = f; } };
+  return { add, move, choose, update, draw, items, occluder: (f) => { hidden = f; } };
 }
