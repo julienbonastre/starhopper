@@ -10,7 +10,7 @@ struct GalP { fb: f32, rb: f32, h: f32, hz: f32, pitch: f32, arms: f32, armC: f3
 // Hubble sequence: 0 E, 1 S0, 2 Sa, 3 Sab, 4 Sb, 5 Sbc, 6 Sc, 7 Scd, 8 Sd/Sm, 9 Irr
 const FB = array<f32, 10>(1.0, 0.55, 0.42, 0.34, 0.26, 0.18, 0.12, 0.08, 0.04, 0.0);
 const PITCH = array<f32, 10>(9.0, 9.0, 9.0, 11.0, 14.0, 17.0, 20.0, 24.0, 28.0, 30.0);
-const ARMC = array<f32, 10>(0.0, 0.0, 0.5, 0.6, 0.72, 0.8, 0.85, 0.7, 0.3, 0.0);
+const ARMC = array<f32, 10>(0.0, 0.0, 0.5, 0.6, 0.72, 0.8, 0.85, 0.7, 0.12, 0.0);
 const CLUMP = array<f32, 10>(0.0, 0.0, 0.15, 0.2, 0.3, 0.4, 0.5, 0.65, 0.9, 1.0);
 fn galParams(t: u32, flat: f32, seed: u32) -> GalP {
   let b = min(t & 15u, 9u);
@@ -65,7 +65,7 @@ fn galEmit(q: vec3f, p: GalP, sd: f32, detail: f32) -> vec4f {
   let discE = disc * mix(1.0, arm, p.armC * inner) * clumps;
   let fy = clamp(c * c * p.armC * inner * 0.75 + p.clump * 0.45 - 0.1, 0.0, 1.0);
   var col = OLD * bul + discE * mix(OLD * 0.95, YOUNG, fy);
-  col += HII * disc * smoothstep(0.62, 0.9, n2) * arm * inner * (p.armC + p.clump * 0.6) * 1.6 * detail;
+  col += HII * disc * smoothstep(0.66, 0.92, n2) * arm * inner * (p.armC + p.clump * 0.6) * 1.1 * detail;
   if (p.bar > 0.0) {
     let a = p.phase * 0.5; let xb = vec2f(q.x * cos(a) + q.y * sin(a), -q.x * sin(a) + q.y * cos(a));
     col += OLD * p.bar * (1.0 - p.fb) * 2.6 * exp(-(xb.x * xb.x) / 0.045 - (xb.y * xb.y) / 0.0035 - q.z * q.z / 0.003);
@@ -290,7 +290,8 @@ fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.0671105
       let u1 = pow((s + 1.0) / N, pw);
       let um = pow((s + jit) / N, pw);
       let tn = t0 + (t1 - t0) * u1; let t = t0 + (t1 - t0) * um; let dt = tn - prev; prev = tn;
-      let e = galEmit(ro + rd * t, P, sd, 1.0);
+      // no fine structure right around the camera: there it would be a few huge blotches across the whole sky
+      let e = galEmit(ro + rd * t, P, sd, smoothstep(0.02, 0.12, t));
       let a = exp(-e.a * V.kappa * dt);
       acc += tr * e.rgb * dt * (1.0 + a) * 0.5;
       tr *= a;

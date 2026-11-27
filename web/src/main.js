@@ -185,7 +185,7 @@ async function main() {
     //  - (points only) up further in the voids, so that distant galaxies show: pointGain
     const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
     const gainSB = 3.3 * sm(0.6, 2.0, out) + 1.0 * sm(3, 30, env);
-    const gainPt = Math.min(5.5, 2.1 * Math.log10(Math.max(env / 3, 1)));
+    const gainPt = Math.min(6.5, 2.6 * Math.log10(Math.max(env / 1.3, 1)));
     const n = stars.near;
     let target = exposureBase * Math.pow(10, 0.4 * gainSB);
     if (n.dist < 1e6) {
@@ -255,8 +255,11 @@ async function main() {
     if (scaleT > 1.5 && !gpu.offscreen && !params.has('fixed')) {
       scaleT = 0;
       const budget = minDt * 1000;
-      if (frameMs > budget * 1.18 && resScale > 0.45) { resScale = Math.max(0.45, resScale - 0.07); resize(); }
-      else if (ts && gpuMs > 0 && gpuMs < budget * 0.55 && frameMs < budget * 1.08 && resScale < quality.startScale) { resScale = Math.min(quality.startScale, resScale + 0.05); resize(); }
+      // GPU time grows with the pixel count, so the scale the budget allows can be estimated directly; move a
+      // third of the way there each step, and only down on evidence of missed frames
+      const fit = gpuMs > 0 ? resScale * Math.sqrt(budget * 0.72 / gpuMs) : resScale;
+      if (frameMs > budget * 1.18 && resScale > 0.45) { resScale = Math.max(0.45, Math.min(resScale - 0.05, gpuMs > 0 ? fit : 1)); resize(); }
+      else if (ts && fit > resScale + 0.04 && frameMs < budget * 1.08 && resScale < quality.startScale) { resScale = Math.min(quality.startScale, resScale + (fit - resScale) / 3); resize(); }
     }
     frames++; fpsT += dt;
     if (fpsT >= 0.5) { fps = frames / fpsT; frames = 0; fpsT = 0; }
