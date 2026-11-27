@@ -198,14 +198,22 @@ async function main() {
   fetch(base + 'manifest.json').then((r) => r.json()).then((m) => {
     $('crb').innerHTML = m.sources.map((x) => `<p><a href="${x.home}" target="_blank" rel="noopener">${x.title}</a><br>${x.credit}. ${x.licence}.</p>`).join('') + '<p>Procedural fill (galaxy shapes, the Milky Way beyond the catalogue, fill stars) is a model, not data. Press P to hide it.</p>';
   }).catch(() => {});
+  // back to low orbit over the daylight side, where every visit begins
+  const toEarth = () => { const s = bodies.launch(); cancelGoto(); flight.vel.fill(0); flight.thr = 0; cam.p.set(s.p); lookQuat(cam.q, s.at[0] - s.p[0], s.at[1] - s.p[1], s.at[2] - s.p[2], s.up[0], s.up[1], s.up[2]); basis(); state.snap = 1; };
   const launch = () => {
     body.classList.add('fly');
+    // from now on the menu is a pause: its main button resumes, and a second one starts over from the Earth
+    $('go').textContent = 'Resume'; $('home').hidden = false; $('x').hidden = false;
     if (show.sound) { show.sound = setSound(true); syncToggles(); }
     // phones fly in landscape: full screen first, since the orientation can only be locked there
     if (MOBILE) document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
     else canvas.requestPointerLock?.()?.catch?.(() => {});
   };
   $('go').onclick = launch;
+  $('home').onclick = () => { toEarth(); launch(); flash('Earth'); };
+  $('x').onclick = launch;
+  $('veil').onclick = (e) => { if (e.target === $('veil') && !$('x').hidden) launch(); };   // a tap beside the menu goes back to the flight
+  $('cz').onclick = () => { flight.cruise = !flight.cruise; $('cz').classList.toggle('on', flight.cruise); if (!flight.cruise) flight.thr = 0; flash(flight.cruise ? 'Holding speed' : 'Speed released'); };
   // a click looks at what is dead ahead (the pointer is locked to the view) and targets it
   // (a mouse click only: the click a phone makes up after a tap must not lock the pointer, which swallows every touch after it)
   canvas.onclick = (e) => { if (!body.classList.contains('fly') || MOBILE || (e.pointerType && e.pointerType !== 'mouse')) return; if (flight.locked) pick(cam.fwd[0], cam.fwd[1], cam.fwd[2]); else canvas.requestPointerLock?.()?.catch?.(() => {}); };

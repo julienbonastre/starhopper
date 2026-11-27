@@ -22,10 +22,13 @@ body.fly #hud { opacity: .92; }
 body.nohud #hud { opacity: 0; }
 #veil { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, #0006 0%, #000c 100%); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); transition: opacity .5s; z-index: 5; }
 body.fly #veil { opacity: 0; pointer-events: none; }
-#card { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 24px); overflow: auto; padding: 26px 28px 22px; text-align: center; }
-h1 { margin: 0; font-weight: 200; font-size: clamp(34px, 7vw, 54px); letter-spacing: .32em; text-indent: .32em; text-transform: uppercase; }
+#card { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 24px); overflow: hidden auto; padding: 26px 28px 22px; text-align: center; }
+h1 { margin: 0; font-weight: 200; font-size: clamp(26px, min(5.4vw, 11vh), 44px); letter-spacing: .26em; text-indent: .26em; text-transform: uppercase; white-space: nowrap; }
 #tag { margin: 4px 0 20px; color: var(--dim); letter-spacing: .22em; text-transform: uppercase; font-size: 11px; }
 #go { appearance: none; font: inherit; font-size: 14px; letter-spacing: .3em; text-indent: .3em; text-transform: uppercase; color: #000; background: var(--fg); border: 0; border-radius: 999px; padding: 12px 34px; cursor: pointer; transition: transform .15s, background .15s; }
+#home { appearance: none; font: inherit; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--fg); background: none; border: 1px solid #ffffff44; border-radius: 999px; padding: 9px 16px; margin-left: 10px; cursor: pointer; }
+#x { position: fixed; z-index: 6; left: max(14px, env(safe-area-inset-left)); top: max(12px, env(safe-area-inset-top)); width: 40px; height: 40px; appearance: none; font: 300 22px/1 system-ui; color: var(--fg); background: #ffffff14; border: 1px solid #ffffff33; border-radius: 50%; cursor: pointer; }
+body.fly #x { display: none; }
 #go:hover { background: #fff; transform: scale(1.04); }
 #go[disabled] { background: #fff3; color: #fff9; cursor: default; transform: none; }
 #bar { height: 2px; margin: 18px auto 8px; width: 60%; background: var(--line); overflow: hidden; border-radius: 2px; }
@@ -62,7 +65,9 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 #thr i { position: absolute; left: 50%; top: 18%; bottom: 18%; width: 4px; margin-left: -2px; border-radius: 2px; background: linear-gradient(#ffffff30, #ffffff0c 50%, #ffffff30); }
 #thr b { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; border: 1px solid #ffffff55; background: #ffffff14; }
 #thr b.on { background: #ffffff38; border-color: #fff; }
-@media (pointer: coarse) { body.fly #thr { display: block; } }
+#cz { display: none; position: fixed; z-index: 4; right: 14px; bottom: max(10px, env(safe-area-inset-bottom)); width: 48px; height: 48px; appearance: none; font: 600 9px/1 system-ui; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); background: #ffffff10; border: 1px solid #ffffff44; border-radius: 50%; }
+#cz.on { color: #000; background: var(--fg); border-color: var(--fg); }
+@media (pointer: coarse) { body.fly #thr { display: block; } body.fly #cz { display: block; } }
 #tk { display: none; margin-top: 14px; font-size: 12px; color: var(--dim); line-height: 1.7; }
 @media (pointer: coarse) { #tk { display: block; } }
 #turn { display: none; position: fixed; inset: 0; z-index: 9; background: #000; place-items: center; text-align: center; letter-spacing: .22em; text-transform: uppercase; font-size: 12px; color: var(--dim); }
@@ -77,18 +82,20 @@ body.e #s { color: #ffb4a8; } body.e #bar, body.e #go { display: none; }
 <button id="menu" aria-label="Menu">&#8801;</button>
 <div id="turn">Turn your phone sideways</div>
 <div id="thr"><i></i><b id="thrk"></b></div>
+<button id="cz" aria-label="Hold the speed">Hold</button>
 <div id="ctx" hidden><div id="ctxn"></div><button id="ctxgo">Fly here</button><button id="ctxno">Not now</button></div>
+<button id="x" hidden aria-label="Back to the flight">&times;</button>
 <div id="veil"><div id="card">
 <h1>Starhopper</h1>
 <div id="tag">The universe, as code</div>
-<button id="go" disabled>Launch</button>
+<button id="go" disabled>Launch</button><button id="home" hidden>Return to Earth</button>
 <div id="bar"><div id="b"></div></div>
 <div id="s">Starting up</div>
 <details id="kd"><summary>Controls</summary><div id="keys">
 <kbd>W A S D</kbd><span>fly</span><kbd>Mouse</kbd><span>look</span><kbd>R / F</kbd><span>up / down</span><kbd>Q / E</kbd><span>roll</span>
 <kbd>Wheel</kbd><span>throttle</span><kbd>Shift / Ctrl</kbd><span>&times;10 / &divide;10</span><kbd>Click</kbd><span>target what you look at</span><kbd>G</kbd><span>fly to the target</span><kbd>1 &ndash; 8</kbd><span>viewpoints</span><kbd>Home</kbd><span>back to Earth</span><kbd>L N X P</kbd><span>lines, names, exoplanet hosts, fill</span><kbd>M</kbd><span>sound</span><kbd>[ ]</kbd><span>exposure</span><kbd>Tab / H</kbd><span>hide panel / frame stats</span><kbd>Esc</kbd><span>this menu</span>
 </div></details>
-<div id="tk">Drag the sky to look around &middot; Right edge: push up to fly forward, pull down to back away<br>Two fingers: spread or pinch to fly, twist to roll<br>Tap: target &middot; Double tap: fly there &middot; Hold: go-to menu</div>
+<div id="tk">Drag the sky to look around &middot; Right edge: push up to fly forward, pull down to back away &middot; Hold: keep that speed<br>Two fingers: spread or pinch to fly, twist to roll<br>Tap: target &middot; Double tap: fly there &middot; Hold: go-to menu</div>
 <input id="find" type="search" placeholder="Fly to a star, planet, nebula or galaxy: Vega, Saturn, M 42, Andromeda ..." autocomplete="off" spellcheck="false">
 <div id="tg"><button data-k="lines">Constellations</button><button data-k="names">Names</button><button data-k="proc" class="on">Procedural fill</button><button data-k="exo">Exoplanet hosts</button><button data-k="sound" class="on">Sound</button><label id="vol">Volume<input id="volr" type="range" min="0" max="100" value="70"></label></div>
 <div id="vp"></div>
