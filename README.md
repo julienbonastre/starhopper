@@ -65,6 +65,8 @@ npm run serve       # http://localhost:8080
 
 Pushing to `main` builds, tests and deploys to GitHub Pages with no manual step.
 
+Every open pull request from a branch of this repository also gets a preview at `https://julienbonastre.github.io/starhopper/pr/<number>/`, linked from a comment on the pull request and marked with a red "Preview" badge. It is rebuilt a few minutes after each push and removed when the pull request closes. A preview that leaves `pipeline/` alone is only its page and reads the live site's data.
+
 ## Measured
 
 On a MacBook Pro (M5 Pro, 20 GPU cores), Chrome 158, macOS 26.7, High detail, 3024 x 1964 at 120 Hz, resolution scale 1.0, over the scripted fly-through (`node tools/bench.mjs`, 2026-11-27):
