@@ -232,7 +232,7 @@ async function main() {
 
   // Everything the first frame does not need: names, constellation figures, nebulae and clusters, exoplanet hosts.
   // Fetched together once the flight is already on screen.
-  let web = null;
+  let web = null, thrShown = 0;
   initWeb(gpu, globalsBuf, base).then((w) => { web = w; }).catch((e) => console.warn('no density grid', e));
   const extras = Promise.all([fetch(base + 'names.json').then((r) => r.json()), fetch(base + 'constellations.json').then((r) => r.json()),
     initDeep(gpu, globalsBuf, base, gal.noise), fetch(base + 'exoplanets.json').then((r) => r.json()).catch(() => ({ hosts: [] }))]).then(([names, cons, dp, exo]) => {
@@ -283,6 +283,7 @@ async function main() {
     const bn = bodies.near;
     if (bn.id >= 0) flight.context = Math.min(flight.context, Math.max(bn.alt, bodies.radius(bn.id) * 0.02));
     if (!state.frozen) updateFlight(dt); else basis();
+    if (flight.thr !== thrShown) { thrShown = flight.thr; const k = $('thrk'); k.style.transform = `translateY(${(-thrShown * innerHeight * 0.32).toFixed(1)}px)`; k.className = thrShown ? 'on' : ''; }
     bodies.update();
 
     // how far outside the nearest galaxy's disc the camera is, in units that make 0..1 "inside" (see adaptation below)
