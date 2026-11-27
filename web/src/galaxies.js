@@ -126,7 +126,7 @@ fn bvColour(bv: f32) -> vec3f {
   var bv = clamp(0.15 * absmag - 0.05, -0.28, 1.5);
   if (absmag < 2.5 && u2.z < 0.4) { bv = 0.95 + 0.5 * u1.x; }
   let d2 = max(dot(rel, rel), 1e-12);
-  var gain = F.gain * smoothstep(1.0, 0.8, max(abs(f32(g.x)), max(abs(f32(g.y)), abs(f32(g.z)))) / f32(F.n / 2));
+  var gain = F.gain * (1.0 - smoothstep(0.8, 1.0, max(abs(f32(g.x)), max(abs(f32(g.y)), abs(f32(g.z)))) / f32(F.n / 2)));
   if (F.isMW == 1u) {
     let ds = rel - F.sun; let m = absmag + 2.5 * log(max(dot(ds, ds), 1e-6)) / 2.302585 - 5.0;   // magnitude seen from the Sun
     gain *= smoothstep(10.0, 11.0, m);
