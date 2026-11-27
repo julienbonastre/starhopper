@@ -13,6 +13,8 @@ export const flight = {
   menu: false,                 // a touch-and-hold menu is open: the finger that opened it does not steer
   thr: 0,                      // the touch throttle strip, -1 (back) .. 1 (forward)
   sx: 0, sy: 0,                // the touch stick: sideways and up/down thrust, -1 .. 1 each
+  ahead: false,                // thrust along the view is being asked for this frame
+  lock: false,                 // keep facing the target, at the same range, so that sideways thrust circles it
   cruise: false,               // the strip stays where it is let go (the Hold button), so the flight carries on hands-free
 };
 const keys = new Set(), EDGE = 1.5e9;   // parsecs
@@ -38,7 +40,7 @@ export function initInput(canvas, onAction) {
   const tp = new Map(); let pinch0 = 0, twist = 0, rolling = false, two = false, downT = 0, lastTap = 0, holdTimer = 0, thrId = -1;
   const HOLD_MS = 450, SLOP = 12, STRIP = 76;
   // the stick: a ring near the bottom left corner (centre STICK_X from the left, STICK_Y up from the bottom)
-  const STICK_X = 92, STICK_Y = 118, STICK_R = 46; let stickId = -1;
+  const STICK_X = 68, STICK_Y = 64, STICK_R = 46; let stickId = -1;
   const stick = (t) => { let x = (t.x - STICK_X) / STICK_R, y = (innerHeight - STICK_Y - t.y) / STICK_R; const n = Math.hypot(x, y); if (n > 1) { x /= n; y /= n; } flight.sx = n < 0.14 ? 0 : x; flight.sy = n < 0.14 ? 0 : y; };
   const looks = () => { const a = []; for (const [id, t] of tp) if (id !== thrId && id !== stickId) a.push(t); return a; };
   const reset = () => { tp.clear(); thrId = -1; stickId = -1; flight.sx = flight.sy = 0; two = false; if (!flight.cruise) flight.thr = 0; touchFwd = 0; clearTimeout(holdTimer); };
@@ -120,6 +122,7 @@ export function updateFlight(dt) {
   const kz = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0);
   const mx = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0) + flight.sx, my = (keys.has('KeyR') ? 1 : 0) - (keys.has('KeyF') ? 1 : 0) + flight.sy, mz = kz + tz;
   // the keys take the controls back from a fly-to; the touch throttle only sets its pace
+  flight.ahead = mz !== 0;
   if (go.on && (mx || my || kz)) cancelGoto();
   if (go.on) {
     // travel along the line with the remaining distance shrinking geometrically, so every scale gets equal time

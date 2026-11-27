@@ -48,7 +48,7 @@ async function main() {
     $('ver').append(' \u00b7 ', a);
   }).catch(() => {});
   // a pull request's preview build says so, so that nobody takes it for the live site
-  if (PREVIEW) { const b = document.createElement('div'); b.textContent = 'Preview of pull request #' + PREVIEW; b.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:9;padding:4px 9px;border-radius:999px;background:#c8102e;color:#fff;font:600 11px system-ui;letter-spacing:.04em;pointer-events:none'; document.body.append(b); }
+  if (PREVIEW) { const b = document.createElement('div'); b.textContent = 'Preview of pull request #' + PREVIEW; b.style.cssText = 'position:fixed;left:50%;top:6px;transform:translateX(-50%);white-space:nowrap;z-index:9;padding:4px 9px;border-radius:999px;background:#c8102e;color:#fff;font:600 11px system-ui;letter-spacing:.04em;pointer-events:none'; document.body.append(b); }
   say('Reading the star and galaxy indexes', 0.3);
   const [stars, galPts, gal] = await Promise.all([
     initPoints(gpu, globalsBuf, base + 'stars/', quality, { budget: quality.starBudget, track: true, magOff: 20, sigma0: 0.62 }),
@@ -115,7 +115,8 @@ async function main() {
   const labelLimit = { star: 0, con: 0, body: 0, deep: 0, galaxy: 0, target: 99 };
   const kindGain = { star: 1, con: 1, body: 1, deep: 1, galaxy: 1, target: 1 };
   const tgtLabel = labels.add('', 'target', 0, 0, 0, NaN, 0, 0, -100);   // the target marker: hidden (maxDist 0) until something is picked
-  const target = { on: false, x: 0, y: 0, z: 0, stop: 0, name: '' };
+  const target = { on: false, x: 0, y: 0, z: 0, stop: 0, name: '', row: null };
+  const setLock = (on) => { flight.lock = on && target.on; $('tblk').classList.toggle('on', flight.lock); $('tblk').textContent = flight.lock ? 'Locked' : 'Lock'; };
 
   // start at Earth's distance from the Sun, facing Orion with celestial north up
   if (params.has('pose')) setPose(+params.get('pose') - 1);
@@ -129,6 +130,7 @@ async function main() {
   initInput(canvas, (code) => {
     if (code === 'KeyH') { showPerf = !showPerf; $('perf').hidden = !showPerf; }
     else if (code === 'Home') flyTo(bodies.pos(3, 0), bodies.pos(3, 1), bodies.pos(3, 2), bodies.radius(3) * 4, 6);
+    else if (code === 'KeyO') { setLock(!flight.lock); if (target.on) flash(flight.lock ? 'Locked on to ' + target.name : 'Lock released'); }
     else if (code === 'KeyG') { if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } }
     else if (code === 'Touch') $('ctx').hidden = true;
     else if (code === 'Tap' || code === 'DoubleTap' || code === 'Hold') {
@@ -186,11 +188,11 @@ async function main() {
     }
     // nothing there, or the target itself picked again: no target
     if (best >= 0 && target.on && index[best][2] === target.x && index[best][3] === target.y && index[best][4] === target.z) best = -1;
-    if (best < 0) { target.on = false; labels.items[tgtLabel].maxDist = 0; $('htr').hidden = true; $('tb').classList.remove('on'); $('arr').classList.remove('on'); return; }
+    if (best < 0) { target.on = false; labels.items[tgtLabel].maxDist = 0; $('htr').hidden = true; $('tb').classList.remove('on'); $('arr').classList.remove('on'); setLock(false); return; }
     setTarget(index[best]);
   }
   function setTarget(r) {
-    target.on = true; target.x = r[2]; target.y = r[3]; target.z = r[4]; target.stop = r[5]; target.name = r[1];
+    target.on = true; target.x = r[2]; target.y = r[3]; target.z = r[4]; target.stop = r[5]; target.name = r[1]; target.row = r;
     labels.move(tgtLabel, '\u25C7 ' + r[1], r[2], r[3], r[4], r[8]); labels.items[tgtLabel].maxDist = Infinity; labelT = 1;
     $('htr').hidden = false; $('tb').classList.add('on'); $('tbn').textContent = r[1]; flash(r[1]);
   }
@@ -278,6 +280,7 @@ async function main() {
   $('ctxgo').onclick = () => { $('ctx').hidden = true; flight.menu = false; if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } };
   // the bar under a target: go there (or stop going there), or let it go
   $('tbgo').onclick = () => { if (flight.goto) cancelGoto(); else if (target.on) { flyTo(target.x, target.y, target.z, target.stop, 9); flash(target.name); } };
+  $('tblk').onclick = () => { setLock(!flight.lock); flash(flight.lock ? 'Locked on to ' + target.name : 'Lock released'); };
   $('tbx').onclick = () => { cancelGoto(); pick(0, 0, 0); };
   $('ctxno').onclick = () => { $('ctx').hidden = true; flight.menu = false; };
   $('svb').onclick = save;
@@ -353,7 +356,29 @@ async function main() {
     flight.context = Math.min(ctx, 3e8);
     const bn = bodies.near;
     if (bn.id >= 0) flight.context = Math.min(flight.context, Math.max(bn.alt, bodies.radius(bn.id) * 0.02));
+    // Lock: the camera keeps facing the target, and its range changes only while thrust toward or away from it is on,
+    // so thrust sideways or up and down carries it around the target in a circle.
+    const locked = flight.lock && target.on && !flight.goto && !state.frozen;
+    let lx = 0, ly = 0, lz = 0, ld = 0, p0x = cam.p[0], p0y = cam.p[1], p0z = cam.p[2];
+    if (locked) { lx = target.x - p0x; ly = target.y - p0y; lz = target.z - p0z; ld = Math.hypot(lx, ly, lz); }
     if (!state.frozen) updateFlight(dt); else basis();
+    if (locked && ld > 0) {
+      const toward = ((cam.p[0] - p0x) * lx + (cam.p[1] - p0y) * ly + (cam.p[2] - p0z) * lz) / ld, want = flight.ahead ? Math.max(ld - toward, target.stop * 0.25) : ld;
+      let dx = target.x - cam.p[0], dy = target.y - cam.p[1], dz = target.z - cam.p[2]; const d = Math.hypot(dx, dy, dz);
+      if (d > 0) {
+        const k = want / d; cam.p[0] = target.x - dx * k; cam.p[1] = target.y - dy * k; cam.p[2] = target.z - dz * k;
+        lookQuat(cam.q, dx, dy, dz, cam.up[0], cam.up[1], cam.up[2]); basis();
+      }
+    }
+    // A named star's catalogued place and the place its point is drawn at (stored on a grid) can differ by a
+    // fraction of an AU: close enough to tell, the target moves onto the star that is drawn.
+    if (target.on && target.row[7] === 0) {
+      const n = stars.near, ex = n.x - target.x, ey = n.y - target.y, ez = n.z - target.z, e = Math.hypot(ex, ey, ez);
+      if (n.dist < 0.05 && e > 0 && e < Math.max(3 * stars.step, 2e-5)) {
+        const r = target.row; r[2] = target.x = n.x; r[3] = target.y = n.y; r[4] = target.z = n.z;
+        labels.move(tgtLabel, '\u25C7 ' + r[1], r[2], r[3], r[4], r[8]);
+      }
+    }
     if (flight.sx !== joyX || flight.sy !== joyY) { joyX = flight.sx; joyY = flight.sy; const k = $('joyk'); k.style.transform = `translate(${(joyX * 26).toFixed(1)}px,${(-joyY * 26).toFixed(1)}px)`; k.className = joyX || joyY ? 'on' : ''; }
     if (flight.thr !== thrShown) { thrShown = flight.thr; const k = $('thrk'); k.style.transform = `translateY(${(-thrShown * innerHeight * 0.32).toFixed(1)}px)`; k.className = thrShown ? 'on' : ''; }
     bodies.update();
@@ -440,7 +465,9 @@ async function main() {
         const hw = iw / 2 - 96, hh = ih / 2 - 44, k = Math.min(hw / Math.max(Math.abs(ux), 1e-6), hh / Math.max(Math.abs(uy), 1e-6));
         px = iw / 2 + ux * k; py = ih / 2 - uy * k; rot = Math.atan2(-uy, ux);
       }
-      a.className = inView ? 'on at' : 'on';
+      // no ring once the target is a disc bigger than the ring
+      const big = inView && target.row[8] / Math.hypot(tx, ty, tz) * f * ih / 2 > 15;
+      a.className = big ? '' : inView ? 'on at' : 'on';
       a.style.transform = `translate(${px.toFixed(1)}px,${py.toFixed(1)}px) rotate(${rot.toFixed(3)}rad)`;
     }
 
