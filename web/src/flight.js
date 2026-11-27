@@ -15,6 +15,7 @@ export const flight = {
   sx: 0, sy: 0,                // the touch stick: sideways and up/down thrust, -1 .. 1 each
   ahead: false,                // thrust along the view is being asked for this frame
   lock: false,                 // keep facing the target, at the same range, so that sideways thrust circles it
+  wheel: false,                // the throttle is being set by scrolling (a desktop): it stays where it is put
   cruise: false,               // the strip stays where it is let go (the Hold button), so the flight carries on hands-free
 };
 const keys = new Set(), EDGE = 1.5e9;   // parsecs
@@ -43,7 +44,7 @@ export function initInput(canvas, onAction) {
   const STICK_X = 68, STICK_Y = 64, STICK_R = 46; let stickId = -1;
   const stick = (t) => { let x = (t.x - STICK_X) / STICK_R, y = (innerHeight - STICK_Y - t.y) / STICK_R; const n = Math.hypot(x, y); if (n > 1) { x /= n; y /= n; } flight.sx = n < 0.14 ? 0 : x; flight.sy = n < 0.14 ? 0 : y; };
   const looks = () => { const a = []; for (const [id, t] of tp) if (id !== thrId && id !== stickId) a.push(t); return a; };
-  const reset = () => { tp.clear(); thrId = -1; stickId = -1; flight.sx = flight.sy = 0; two = false; if (!flight.cruise) flight.thr = 0; touchFwd = 0; clearTimeout(holdTimer); };
+  const reset = () => { tp.clear(); thrId = -1; stickId = -1; flight.sx = flight.sy = 0; two = false; if (!flight.cruise && !flight.wheel) flight.thr = 0; touchFwd = 0; clearTimeout(holdTimer); };
   canvas.addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'touch') return;
     if (e.isPrimary) reset();                         // a first finger: whatever was left over from a lost touch is void
@@ -90,7 +91,17 @@ export function initInput(canvas, onAction) {
   // a touch the browser took away without telling (a system gesture, the app going to the background) must not
   // leave a finger "down" for ever
   addEventListener('blur', reset); document.addEventListener('visibilitychange', reset);
-  canvas.addEventListener('wheel', (e) => { e.preventDefault(); /* a wheel notch is a tenth of a decade; a trackpad's stream of small scrolls adds up to the same per swipe */ const dy = e.deltaMode ? e.deltaY * 33 : e.deltaY; flight.throttle = Math.max(-3, Math.min(4, flight.throttle - Math.max(-50, Math.min(50, dy)) * 0.002)); }, { passive: false });
+  // Scrolling (a wheel, or two fingers on a trackpad) moves the same throttle the touch strip does, and it stays
+  // where it is put: several swipes from standstill to the top, so there is room to be precise. Space stops.
+  let raw = 0;
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const dy = e.deltaMode ? e.deltaY * 33 : e.deltaY;
+    if (Math.abs(raw - flight.thr) > 0.09) raw = flight.thr;           // something else moved it (Space, the menu)
+    raw = Math.max(-1, Math.min(1, raw - Math.max(-120, Math.min(120, dy)) / 2500));
+    flight.thr = Math.abs(raw) < 0.08 ? 0 : raw; flight.wheel = true;
+  }, { passive: false });
+  addEventListener('keydown', (e) => { if (e.code === 'Space' && e.target.tagName !== 'INPUT' && flight.wheel) { flight.thr = 0; raw = 0; } });
 }
 
 // start an eased flight to a point, stopping `stop` parsecs short of it
