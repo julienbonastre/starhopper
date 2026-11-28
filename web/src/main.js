@@ -42,11 +42,13 @@ async function main() {
   const base = DATA_BASE;
   // Which build this is. The host lets browsers keep the page for ten minutes, so a page can be older than the site:
   // ask (uncached) what is deployed now and, if it is something else, offer it under an address the cache has not seen.
-  $('ver').textContent = (PREVIEW ? 'Preview of pull request #' + PREVIEW + ' \u00b7 ' : '') + 'Build ' + VERSION;
+  $('ver').textContent = (PREVIEW ? 'Preview of pull request #' + PREVIEW + ' \u00b7 ' : '') + 'Build ';
+  // the build's name links to its release notes (or, for a preview, to its pull request)
+  if (VERSION_URL) { const a = document.createElement('a'); a.textContent = VERSION; a.href = VERSION_URL; a.target = '_blank'; a.rel = 'noopener'; $('ver').append(a); } else $('ver').append(VERSION);
   fetch('version.json?' + Date.now(), { cache: 'no-store' }).then((r) => r.json()).then((v) => {
     if (!v.version || v.version === VERSION) return;
     const a = document.createElement('a'); a.textContent = 'newer build available: load ' + v.version.split(' ')[0];
-    a.onclick = () => location.replace(location.pathname + '?b=' + encodeURIComponent(v.version.split(' ')[0]));
+    a.onclick = () => location.replace(location.pathname + '?b=' + encodeURIComponent(v.version.split(' \u00b7 ').slice(0, 2).join('-')));
     $('ver').append(' \u00b7 ', a);
   }).catch(() => {});
   // a pull request's preview build says so, so that nobody takes it for the live site
