@@ -82,6 +82,15 @@ body.fly #thr { display: block; }
 body.fly #tc { display: flex; }
 #tc button { appearance: none; font: inherit; min-width: 30px; height: 28px; color: var(--fg); background: #ffffff14; border: 0; border-radius: 999px; padding: 0 8px; cursor: pointer; }
 #tc span { padding: 0 6px; } #tc #tcr { color: var(--acc); min-width: 5.5em; text-align: center; }
+#info { display: none; position: fixed; z-index: 5; left: max(12px, env(safe-area-inset-left)); top: 58px; width: min(310px, calc(100vw - 120px)); max-height: calc(100vh - 180px); overflow-y: auto; padding: 12px 14px 12px; font-size: 12px; line-height: 1.45; background: #06080ce8; border: 1px solid #ffffff22; border-radius: 14px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+body.fly #info.on { display: block; }
+#info h2 { margin: 0 28px 8px 0; font-size: 14px; font-weight: 600; color: var(--acc); }
+#info #infx { position: absolute; right: 8px; top: 8px; appearance: none; width: 28px; height: 28px; font: inherit; color: var(--fg); background: #ffffff1c; border: 0; border-radius: 50%; cursor: pointer; }
+#info dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0 0 8px; } #info dt { color: var(--dim); } #info dd { margin: 0; }
+#info p { margin: 0 0 8px; } #info img { display: block; max-width: 100%; max-height: 150px; margin: 0 auto 8px; border-radius: 8px; }
+#info small { color: var(--dim); } #info a { color: var(--acc); }
+#tb #tbi { color: var(--fg); background: #ffffff1c; padding: 8px 12px; font-style: italic; font-family: Georgia, serif; text-transform: none; letter-spacing: 0; }
+#tb #tbi.on { color: #000; background: var(--acc); }
 #arr { display: none; position: fixed; z-index: 3; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
 body.fly #arr.on { display: block; }
 #arr i { position: absolute; left: -11px; top: -9px; border-left: 20px solid var(--acc); border-top: 9px solid transparent; border-bottom: 9px solid transparent; filter: drop-shadow(0 0 4px #000); }
@@ -116,9 +125,10 @@ body.fly #tb.on { display: flex; }
 <button id="cz" aria-label="Hold the speed">Hold</button>
 <div id="joy"><b id="joyk"></b></div>
 <div id="tc"><button id="tcss" aria-label="Slower by a whole unit, or backwards">&#9664;&#9664;</button><button id="tcs" aria-label="A little slower">&#9664;</button><button id="tcp" aria-label="Pause or run the clock">&#10074;&#10074;</button><button id="tcf" aria-label="A little faster">&#9654;</button><button id="tcff" aria-label="Faster by a whole unit">&#9654;&#9654;</button><span id="tcd"></span><span id="tcr"></span><button id="tcn">Now</button></div>
+<div id="info"><button id="infx" aria-label="Close">&times;</button><h2 id="infn"></h2><dl id="inff"></dl><p id="infl"></p><div id="infw"></div></div>
 <div id="arr"><i></i></div>
 <div id="xh"></div>
-<div id="tb"><span id="tbn"></span><button id="tbgo">Fly there</button><button id="tblk" aria-label="Keep facing the target and circle it">Lock</button><button id="tbx" aria-label="Clear the target">&times;</button></div>
+<div id="tb"><span id="tbn"></span><button id="tbi" aria-label="About this object">i</button><button id="tbgo">Fly there</button><button id="tblk" aria-label="Keep facing the target and circle it">Lock</button><button id="tbx" aria-label="Clear the target">&times;</button></div>
 <div id="ctx" hidden><div id="ctxn"></div><button id="ctxgo">Fly here</button><button id="ctxno">Just target</button></div>
 <button id="x" hidden aria-label="Back to the flight">&times;</button>
 <div id="veil"><div id="card">
@@ -129,7 +139,7 @@ body.fly #tb.on { display: flex; }
 <div id="s">Starting up</div>
 <details id="kd"><summary>Controls</summary><div id="keys">
 <kbd>W A S D</kbd><span>fly</span><kbd>Mouse</kbd><span>look</span><kbd>R / F</kbd><span>up / down</span><kbd>Q / E</kbd><span>roll</span>
-<kbd>Scroll</kbd><span>throttle: it stays where you leave it, shown on the right edge (two fingers on a trackpad)</span><kbd>Space</kbd><span>stop</span><kbd>+ &minus;</kbd><span>how fast W and S go</span><kbd>Shift / Ctrl</kbd><span>&times;10 / &divide;10</span><kbd>Click</kbd><span>target what is under the small cross in the middle</span><kbd>, . T /</kbd><span>the clock: slower, faster (with Shift, by a whole unit), pause, back to now</span><kbd>V</kbd><span>speed streaks on or off</span><kbd>G</kbd><span>fly to the target</span><kbd>O</kbd><span>lock on to it: sideways keys circle it</span><kbd>1 &ndash; 8</kbd><span>viewpoints</span><kbd>0</kbd><span>back to Earth (or Home)</span><kbd>L N X P</kbd><span>lines, names, exoplanet hosts, fill</span><kbd>M</kbd><span>sound</span><kbd>[ ]</kbd><span>exposure</span><kbd>Tab / H</kbd><span>hide panel / frame stats</span><kbd>Esc</kbd><span>this menu, and back to the flight</span>
+<kbd>Scroll</kbd><span>throttle: it stays where you leave it, shown on the right edge (two fingers on a trackpad)</span><kbd>Space</kbd><span>stop</span><kbd>+ &minus;</kbd><span>how fast W and S go</span><kbd>Shift / Ctrl</kbd><span>&times;10 / &divide;10</span><kbd>Click</kbd><span>target what is under the small cross in the middle</span><kbd>, . T /</kbd><span>the clock: slower, faster (with Shift, by a whole unit), pause, back to now</span><kbd>V</kbd><span>speed streaks on or off</span><kbd>I</kbd><span>about the target</span><kbd>G</kbd><span>fly to the target</span><kbd>O</kbd><span>lock on to it: sideways keys circle it</span><kbd>1 &ndash; 8</kbd><span>viewpoints</span><kbd>0</kbd><span>back to Earth (or Home)</span><kbd>L N X P</kbd><span>lines, names, exoplanet hosts, fill</span><kbd>M</kbd><span>sound</span><kbd>[ ]</kbd><span>exposure</span><kbd>Tab / H</kbd><span>hide panel / frame stats</span><kbd>Esc</kbd><span>this menu, and back to the flight</span>
 </div></details>
 <div id="tk">Drag the sky to look around &middot; Right edge: push up to fly forward, pull down to back away &middot; Hold button: keep that speed<br>Bottom-left ring: slide sideways, up or down &middot; Two fingers: spread or pinch to fly, twist to roll<br>Tap: target, then Fly there &middot; Double tap: fly there at once &middot; Long press: go-to menu</div>
 <input id="find" type="search" placeholder="Find a star, planet, nebula or galaxy: Vega, Saturn, M 42, Andromeda ..." autocomplete="off" spellcheck="false">

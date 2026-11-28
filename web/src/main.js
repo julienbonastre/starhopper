@@ -17,6 +17,7 @@ import { initWeb } from './web.js';
 import { setSound, setVolume, setEngine, updateSound, level } from './audio.js';
 import { PLANETS, orbitPoints, jdNow } from './solar.js';
 import { retarget } from './flight.js';
+import { facts, wiki } from './info.js';
 
 const body = document.body, canvas = $('c');
 const params = new URLSearchParams(location.search);
@@ -136,6 +137,7 @@ async function main() {
     else if (code === 'Home' || code === 'Digit0') going = bodyRow[3], flyTo(bodies.pos(3, 0), bodies.pos(3, 1), bodies.pos(3, 2), bodies.radius(3) * 4, 6);
     else if (code === 'KeyO') { setLock(!flight.lock); if (target.on) flash(flight.lock ? 'Locked on to ' + target.name : 'Lock released'); }
     else if (code === 'Comma') stepRate(-1, shifted); else if (code === 'Period') stepRate(1, shifted); else if (code === 'Slash') clockNow(); else if (code === 'KeyT') togglePause();
+    else if (code === 'KeyI') { if (target.on) showInfo(!$('info').classList.contains('on')); }
     else if (code === 'KeyG') { if (target.on) { (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9)); flash(target.name); } }
     else if (code === 'Touch') $('ctx').hidden = true;
     else if (code === 'Tap' || code === 'DoubleTap' || code === 'Hold') {
@@ -194,12 +196,13 @@ async function main() {
     }
     // nothing there, or the target itself picked again: no target
     if (best >= 0 && target.on && index[best][2] === target.x && index[best][3] === target.y && index[best][4] === target.z) best = -1;
-    if (best < 0) { target.on = false; labels.items[tgtLabel].maxDist = 0; $('htr').hidden = true; $('tb').classList.remove('on'); $('arr').classList.remove('on'); setLock(false); return; }
+    if (best < 0) { target.on = false; labels.items[tgtLabel].maxDist = 0; $('htr').hidden = true; $('tb').classList.remove('on'); $('arr').classList.remove('on'); setLock(false); showInfo(false); return; }
     setTarget(index[best]);
   }
   function setTarget(r) {
     target.on = true; target.x = r[2]; target.y = r[3]; target.z = r[4]; target.stop = r[5]; target.name = r[1]; target.row = r;
     labels.move(tgtLabel, '\u25C7 ' + r[1], r[2], r[3], r[4], r[8]); labels.items[tgtLabel].maxDist = Infinity; labelT = 1;
+    if ($('info').classList.contains('on')) queueMicrotask(() => showInfo(true));   // the card follows the target
     $('htr').hidden = false; $('tb').classList.add('on'); $('tbn').textContent = r[1]; flash(r[1]);
   }
   // Search: the best few matches are listed as you type. Exact names first, then names that start with what was
@@ -295,7 +298,39 @@ async function main() {
   };
   $('ctxgo').onclick = () => { $('ctx').hidden = true; flight.menu = false; if (target.on) { (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9)); flash(target.name); } };
   // the bar under a target: go there (or stop going there), or let it go
-  $('tbgo').onclick = () => { if (flight.goto) cancelGoto(); else if (target.on) { (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9)); flash(target.name); } };
+  // Stop means stop: without this a throttle held up to hurry the trip would carry straight on
+  $('tbgo').onclick = () => { if (flight.goto) { cancelGoto(); halt(); } else if (target.on) { (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9)); flash(target.name); } };
+  // The info card: what the catalogue says about the target, then a few lines and a picture from Wikipedia if it
+  // has a page that is plainly about this object. Built with text nodes only: nothing fetched is parsed as HTML.
+  let infoRow = null, infoAt = 0;
+  const infoEl = (tag, text) => { const e = document.createElement(tag); e.textContent = text; return e; };
+  function showFacts(r) {
+    const cd = Math.hypot(r[2] - cam.p[0], r[3] - cam.p[1], r[4] - cam.p[2]), ed = Math.hypot(r[2] - bodies.pos(3, 0), r[3] - bodies.pos(3, 1), r[4] - bodies.pos(3, 2));
+    const f = facts(r, cd, ed);
+    $('inff').replaceChildren(...f.facts.flatMap(([k, v]) => [infoEl('dt', k), infoEl('dd', v)]));
+    $('infl').textContent = f.line; $('infl').hidden = !f.line;
+    infoAt = performance.now();
+    return f.line;
+  }
+  function showInfo(on) {
+    $('info').classList.toggle('on', on && target.on); $('tbi').classList.toggle('on', on && target.on);
+    if (!on || !target.on) { infoRow = null; return; }
+    const r = infoRow = target.row, line = showFacts(r), el = infoEl;
+    $('infn').textContent = r[1] === 'Sol' ? 'Sun' : r[1];
+    $('infw').replaceChildren(el('small', 'Looking it up \u2026'));
+    wiki(r).then((w) => {
+      if (infoRow !== r) return;
+      if (!w) { $('infw').replaceChildren(el('small', line ? '' : 'No further information found for this object.')); return; }
+      const kids = [];
+      if (w.img && /^https:\/\/(upload|thumb)\.wikimedia\.org\//.test(w.img)) { const im = document.createElement('img'); im.src = w.img; im.alt = w.title; im.referrerPolicy = 'no-referrer'; kids.push(im); }
+      kids.push(el('p', w.text));
+      const cr = el('small', 'Text and picture from '), a = el('a', 'Wikipedia'); a.href = w.url; a.target = '_blank'; a.rel = 'noopener'; cr.append(a, ' (CC BY-SA; the picture\u2019s own licence is on its page).');
+      kids.push(cr); $('infw').replaceChildren(...kids);
+    });
+  }
+  $('tbi').onclick = () => showInfo(!$('info').classList.contains('on'));
+  $('infx').onclick = () => showInfo(false);
+  canvas.addEventListener('pointerdown', () => { if ($('info').classList.contains('on') && MOBILE) showInfo(false); });
   $('tblk').onclick = () => { setLock(!flight.lock); flash(flight.lock ? 'Locked on to ' + target.name : 'Lock released'); };
   // The clock. It starts at the present, running at the true rate; the buttons step through faster rates (and
   // backwards), pause it, or bring it back to now. Only the Sun's family moves: the stars are too far to show it.
@@ -392,7 +427,7 @@ async function main() {
   let last = performance.now(), time = 0, frames = 0, fpsT = 0, fps = 0, cpuMs = 0;
   const dts = new Float32Array(128), dtSort = new Float32Array(128);
   let busy = false, exoFade = 0, conFade = 0, nameFade = 0, labelT = 1, pointGain = 1, procFade = 1;
-  let starCtx = 1, wasGoing = false;
+  let starCtx = 1;
   const trail = new Float64Array(3), trailP = new Float64Array(3), rode = new Float64Array(3);   // streak vector, last camera place, how far a planet carried the camera this frame
   const DIFFUSE = 24;   // extended light is lifted relative to point sources, as dark-adapted eyes do
   const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -418,16 +453,13 @@ async function main() {
     flight.context = Math.min(ctx, 3e8);
     const bn = bodies.near;
     if (bn.id >= 0) flight.context = Math.min(flight.context, Math.max(bn.alt, bodies.radius(bn.id) * 0.02));
-    // a fly-to that has just ended leaves the throttle at rest, not at whatever pace it was being hurried along at
-    if (wasGoing && !flight.goto && flight.thr) halt();
-    wasGoing = !!flight.goto;
     tick(now);   // the clock first, so that the flight, the lock and the picture all use this frame's positions
     // Lock: the camera keeps facing the target, and its range changes only while thrust toward or away from it is on,
     // so thrust sideways or up and down carries it around the target in a circle.
     const locked = flight.lock && target.on && !flight.goto && !state.frozen;
     let lx = 0, ly = 0, lz = 0, ld = 0, p0x = cam.p[0], p0y = cam.p[1], p0z = cam.p[2];
     if (locked) { lx = target.x - p0x; ly = target.y - p0y; lz = target.z - p0z; ld = Math.hypot(lx, ly, lz); }
-    if (!state.frozen) updateFlight(dt); else basis();
+    if (!state.frozen) { if (updateFlight(dt)) halt(); } else basis();
     if (locked && ld > 0) {
       const toward = ((cam.p[0] - p0x) * lx + (cam.p[1] - p0y) * ly + (cam.p[2] - p0z) * lz) / ld, floor = target.stop * 0.25, want = flight.ahead ? Math.max(ld - toward, floor) : ld;
       // as close as the lock goes: a throttle still pushing would only read as speed that goes nowhere
@@ -447,6 +479,7 @@ async function main() {
         labels.move(tgtLabel, '\u25C7 ' + r[1], r[2], r[3], r[4], r[8]);
       }
     }
+    if (infoRow && infoRow === target.row && now - infoAt >= 500) showFacts(infoRow);
     if (flight.sx !== joyX || flight.sy !== joyY) { joyX = flight.sx; joyY = flight.sy; const k = $('joyk'); k.style.transform = `translate(${(joyX * 26).toFixed(1)}px,${(-joyY * 26).toFixed(1)}px)`; k.className = joyX || joyY ? 'on' : ''; }
     if (flight.thr !== thrShown) { thrShown = flight.thr; const k = $('thrk'); k.style.transform = `translateY(${(-thrShown * innerHeight * 0.32).toFixed(1)}px)`; k.className = thrShown ? 'on' : ''; }
     bodies.update();

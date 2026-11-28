@@ -41,6 +41,8 @@ Measured, from catalogues pinned by checksum:
 
 Flying fast draws the nearby stars and galaxies out into streaks along their path across the view, as an open shutter would; `V` turns that off.
 
+The target bar's **i** button (`I`) opens a card about the target: what the catalogue itself says (kind, distances, size, light, and for the planets a few figures from NASA's fact sheets), then two or three sentences and a picture from Wikipedia where it has a page plainly about that object. The Wikipedia part is fetched from your browser when you open the card, is credited and linked there, and is not stored with the site; opening a card therefore tells Wikipedia which object you looked up.
+
 Procedural, and hidden by `P`:
 
 - The shapes of galaxies (spiral, elliptical or irregular from the catalogued type, size and tilt) and of nebulae.
