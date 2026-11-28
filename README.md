@@ -14,7 +14,7 @@ Rendered with WebGPU and no engine. Everything on screen is either a public cata
 
 | | |
 |---|---|
-| `W A S D`, mouse | fly and look (click the view to capture the mouse) |
+| `W A S D`, mouse | fly, and look: hold the mouse button and drag the sky; click something to target it, double click to fly there. The pointer stays free for the clock, the target bar and the info card. (The menu's Capture mouse option gives the mouse to the view until `Esc`, as a first-person game does.) |
 | `R` / `F`, `Q` / `E` | up / down, roll |
 | scroll (two fingers on a trackpad), `Space` | the throttle, shown on a gauge at the right edge: it stays where you leave it, forward above the middle and back below; `Space` stops |
 | `+` `-`, `Shift`, `Ctrl` | how fast `W` and `S` go: exponential, and it follows how close things are |
