@@ -15,6 +15,7 @@ export const flight = {
   sx: 0, sy: 0,                // the touch stick: sideways and up/down thrust, -1 .. 1 each
   ahead: false,                // thrust along the view is being asked for this frame
   lock: false,                 // keep facing the target, at the same range, so that sideways thrust circles it
+  free: true,                  // a desktop mouse stays free: hold the button and drag to look, click to target
   wheel: false,                // the throttle is being set by scrolling (a desktop): it stays where it is put
   cruise: false,               // the strip stays where it is let go (the Hold button), so the flight carries on hands-free
 };
@@ -88,6 +89,29 @@ export function initInput(canvas, onAction) {
     if (!looks().length) two = false;
   };
   for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(ev, up);
+  // A free mouse (flight.free, and not captured): the pointer stays on screen for the controls. Holding the button
+  // and dragging turns the view, the sky following the pointer as it does under a finger; a click without a drag
+  // targets what is under it, and a double click flies there.
+  let md = null, lastClick = 0;
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0 || !flight.free || flight.locked) return;
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* the pointer is already gone */ }
+    md = { id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, moved: false };
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!md || e.pointerId !== md.id) return;
+    const dx = e.clientX - md.x, dy = e.clientY - md.y; md.x = e.clientX; md.y = e.clientY;
+    if (Math.hypot(md.x - md.x0, md.y - md.y0) > 4) { md.moved = true; canvas.style.cursor = 'grabbing'; }
+    if (md.moved) { touchX += dx; touchY += dy; }
+  });
+  const mup = (e) => {
+    if (!md || e.pointerId !== md.id) return;
+    const m = md; md = null; canvas.style.cursor = '';
+    if (m.moved || e.type !== 'pointerup') return;
+    const now = performance.now(), dbl = now - lastClick < 380; lastClick = dbl ? 0 : now;
+    flight.tapX = m.x; flight.tapY = m.y; onAction(dbl ? 'DoubleTap' : 'Tap');
+  };
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(ev, mup);
   // a touch the browser took away without telling (a system gesture, the app going to the background) must not
   // leave a finger "down" for ever
   addEventListener('blur', reset); document.addEventListener('visibilitychange', reset);
@@ -96,12 +120,18 @@ export function initInput(canvas, onAction) {
   let raw = 0;
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
+    if (e.ctrlKey) return;                                              // a trackpad pinch, not a scroll (see below)
     const dy = e.deltaMode ? e.deltaY * 33 : e.deltaY;
     if (Math.abs(raw - flight.thr) > 0.09) raw = flight.thr;           // something else moved it (Space, the menu)
     raw = Math.max(-1, Math.min(1, raw - Math.max(-120, Math.min(120, dy)) / 2500));
     flight.thr = Math.abs(raw) < 0.08 ? 0 : raw; flight.wheel = true;
   }, { passive: false });
   addEventListener('keydown', (e) => { if (e.code === 'Space' && e.target.tagName !== 'INPUT' && flight.wheel) { flight.thr = 0; raw = 0; } });
+  // A pinch on a trackpad would magnify the whole page, pushing the panels and the target's arrow off the edges of
+  // the window with no obvious way back. Chrome and Firefox report it as a wheel event with Ctrl held; Safari as
+  // gesture events. Neither is allowed to zoom the page.
+  addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+  for (const ev of ['gesturestart', 'gesturechange']) addEventListener(ev, (e) => e.preventDefault(), { passive: false });
 }
 
 // start an eased flight to a point, stopping `stop` parsecs short of it

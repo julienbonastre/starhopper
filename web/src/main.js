@@ -116,7 +116,7 @@ async function main() {
   labels.occluder(bodies.hides);
   place(0, bodies.night());
   // the picture comes first: figures and names are off until asked for
-  const show = { lines: false, names: false, proc: true, sound: true, exo: false, trails: true };
+  const show = { lines: false, names: false, proc: true, sound: true, exo: false, trails: true, capture: false };
   const labelLimit = { star: 0, con: 0, body: 0, deep: 0, galaxy: 0, target: 99 };
   const kindGain = { star: 1, con: 1, body: 1, deep: 1, galaxy: 1, target: 1 };
   const tgtLabel = labels.add('', 'target', 0, 0, 0, NaN, 0, 0, -100);   // the target marker: hidden (maxDist 0) until something is picked
@@ -145,7 +145,8 @@ async function main() {
     else if (code === 'Tap' || code === 'DoubleTap' || code === 'Hold') {
       const nx = flight.tapX / innerWidth * 2 - 1, ny = 1 - flight.tapY / innerHeight * 2, f = 1 / Math.tan(cam.fov / 2), asp = innerWidth / innerHeight;
       let dx = cam.right[0] * nx * asp / f + cam.up[0] * ny / f + cam.fwd[0], dy = cam.right[1] * nx * asp / f + cam.up[1] * ny / f + cam.fwd[1], dz = cam.right[2] * nx * asp / f + cam.up[2] * ny / f + cam.fwd[2];
-      const n = Math.hypot(dx, dy, dz); pick(dx / n, dy / n, dz / n);
+      // the second tap of a double tap lands on what the first one targeted: it must not let it go again
+      const n = Math.hypot(dx, dy, dz); pick(dx / n, dy / n, dz / n, code === 'DoubleTap');
       if (code === 'DoubleTap' && target.on) (going = target.row, flyTo(target.x, target.y, target.z, target.stop, 9));
       // held on something: offer to go there, in a small menu beside the finger
       if (code === 'Hold' && target.on) {
@@ -162,17 +163,22 @@ async function main() {
     else if (code === 'KeyN') { show.names = !show.names; syncToggles(); }
     else if (code === 'KeyX') { show.exo = !show.exo; syncToggles(); flash(show.exo ? markers.count.toLocaleString() + ' stars with known planets' : 'Exoplanet hosts hidden'); }
     else if (code === 'KeyM') { show.sound = setSound(!show.sound); syncToggles(); keep('starhopperSound', show.sound ? 1 : 0); flash(show.sound ? 'Sound on' : 'Sound off'); }
-    else if (code === 'KeyV') { show.trails = !show.trails; flash(show.trails ? 'Speed streaks on' : 'Speed streaks off'); }
+    else if (code === 'KeyV') { show.trails = !show.trails; syncToggles(); keep('starhopperTrails', show.trails ? 1 : 0); flash(show.trails ? 'Speed streaks on' : 'Speed streaks off'); }
     else if (code === 'KeyP') { show.proc = !show.proc; syncToggles(); flash(show.proc ? 'Procedural fill on' : 'Measured data only'); }
     else if (/^Digit[1-8]$/.test(code)) { cancelGoto(); halt(); freshNight(); setPose(+code[5] - 1); state.snap = 1; flash(POSES[+code[5] - 1].name); }
     else if (code === 'Unlocked' && !params.has('auto')) { body.classList.remove('fly'); if (flight.wheel) flight.thr = 0; }   // the menu is a pause: a scrolled throttle is let go
     else if (code === 'KeyB' && params.has('bench')) { flash('Benchmark running'); runBench().then((r) => { showPerf = true; $('perf').hidden = false; console.log(JSON.stringify(r)); flash('Benchmark done'); $('s').textContent = JSON.stringify(r); body.classList.remove('fly'); }); }
   });
   const flash = (t) => { const m = $('msg'); m.textContent = t; m.classList.add('on'); clearTimeout(flash.t); flash.t = setTimeout(() => m.classList.remove('on'), 2200); };
-  document.querySelectorAll('#tg button').forEach((b) => { b.onclick = () => { const k = b.dataset.k; show[k] = k === 'sound' ? setSound(!show[k]) : !show[k]; b.classList.toggle('on', show[k]); if (k === 'sound') keep('starhopperSound', show[k] ? 1 : 0); }; });
+  document.querySelectorAll('#tg button').forEach((b) => { b.onclick = () => { const k = b.dataset.k; show[k] = k === 'sound' ? setSound(!show[k]) : !show[k]; b.classList.toggle('on', show[k]); if (k === 'sound') keep('starhopperSound', show[k] ? 1 : 0); if (k === 'capture') { keep('starhopperCapture', show[k] ? 1 : 0); setCapture(); } if (k === 'trails') keep('starhopperTrails', show[k] ? 1 : 0); }; });
+  // Mouse: free by default (drag to look, the controls stay clickable); captured is the old way, the mouse steering
+  // the whole view until Esc.
+  const setCapture = () => { flight.free = !show.capture; body.classList.toggle('cap', show.capture); if (!show.capture && document.pointerLockElement) document.exitPointerLock(); };
   const syncToggles = () => document.querySelectorAll('#tg button').forEach((b) => b.classList.toggle('on', show[b.dataset.k]));
   // sound is on unless it was turned off on an earlier visit; the volume is remembered too. (The sound itself can only
   // start from a tap or a key, so it begins at Launch.)
+  try { if (localStorage.starhopperCapture === '1') show.capture = true; if (localStorage.starhopperTrails === '0') show.trails = false; } catch {}
+  setCapture();
   try { if (localStorage.starhopperSound === '0') show.sound = false; if (localStorage.starhopperVol) $('volr').value = localStorage.starhopperVol; } catch {}
   syncToggles(); setVolume($('volr').value / 100);
   $('volr').oninput = (e) => { setVolume(e.target.value / 100); keep('starhopperVol', e.target.value); };
@@ -186,7 +192,7 @@ async function main() {
   for (let i = 1; i < bodies.count; i++) index.push(bodyRow[i] = [bodies.names[i].toLowerCase(), bodies.names[i], bodies.pos(i, 0), bodies.pos(i, 1), bodies.pos(i, 2), bodies.radius(i) * 4, -99, 2, bodies.radius(i)]);
   // target whatever lies closest to a view ray (unit vector), among the things bright enough to be on screen
   let curMag = 6, curGal = 12;
-  function pick(dx, dy, dz) {
+  function pick(dx, dy, dz, keep = false) {
     let best = -1, bs = 0.038;                                   // within about two degrees, or inside the object's disc
     for (let i = 0; i < index.length; i++) {
       const r = index[i], x = r[2] - cam.p[0], y = r[3] - cam.p[1], z = r[4] - cam.p[2], d = Math.sqrt(x * x + y * y + z * z);
@@ -197,7 +203,7 @@ async function main() {
       if (sc < bs) { bs = sc; best = i; }
     }
     // nothing there, or the target itself picked again: no target
-    if (best >= 0 && target.on && index[best][2] === target.x && index[best][3] === target.y && index[best][4] === target.z) best = -1;
+    if (!keep && best >= 0 && target.on && index[best][2] === target.x && index[best][3] === target.y && index[best][4] === target.z) best = -1;
     if (best < 0) { target.on = false; labels.items[tgtLabel].maxDist = 0; $('htr').hidden = true; $('tb').classList.remove('on'); $('arr').classList.remove('on'); setLock(false); showInfo(false); return; }
     setTarget(index[best]);
   }
@@ -264,6 +270,7 @@ async function main() {
     if (MOBILE) document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
     else {
       // Chrome refuses to take the pointer again for about a second after Esc gave it back: ask once more then
+      if (flight.free) return;                                             // a free mouse is never taken
       const ask = () => canvas.requestPointerLock?.()?.catch?.(() => {});
       const p = canvas.requestPointerLock?.();
       p?.catch?.(() => setTimeout(() => { if (body.classList.contains('fly') && !flight.locked) ask(); }, 1300));
@@ -271,7 +278,12 @@ async function main() {
   };
   // Esc leaves the flight for the menu (the browser hands the pointer back); Esc again goes back to the flight
   let unlockedAt = 0; document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement) unlockedAt = performance.now(); });
-  addEventListener('keydown', (e) => { if (e.code === 'Escape' && !e.repeat && !body.classList.contains('fly') && !$('x').hidden && performance.now() - unlockedAt > 350) { e.preventDefault(); $('find').blur(); launch(); } });
+  addEventListener('keydown', (e) => {
+    if (e.code !== 'Escape' || e.repeat) return;
+    if (!body.classList.contains('fly')) { if (!$('x').hidden && performance.now() - unlockedAt > 350) { e.preventDefault(); $('find').blur(); launch(); } }
+    // with a free mouse there is no capture for Esc to release, so Esc opens the menu itself
+    else if (!flight.locked && !MOBILE && !params.has('auto')) { e.preventDefault(); body.classList.remove('fly'); if (flight.wheel) flight.thr = 0; }
+  });
   $('go').onclick = launch;
   $('home').onclick = () => { toEarth(); launch(); flash('Earth'); };
   $('x').onclick = launch;
@@ -279,7 +291,7 @@ async function main() {
   $('cz').onclick = () => { flight.cruise = !flight.cruise; $('cz').classList.toggle('on', flight.cruise); if (!flight.cruise) flight.thr = 0; flash(flight.cruise ? 'Holding speed' : 'Speed released'); };
   // a click looks at what is dead ahead (the pointer is locked to the view) and targets it
   // (a mouse click only: the click a phone makes up after a tap must not lock the pointer, which swallows every touch after it)
-  canvas.onclick = (e) => { if (!body.classList.contains('fly') || MOBILE || (e.pointerType && e.pointerType !== 'mouse')) return; if (flight.locked) pick(cam.fwd[0], cam.fwd[1], cam.fwd[2]); else canvas.requestPointerLock?.()?.catch?.(() => {}); };
+  canvas.onclick = (e) => { if (!body.classList.contains('fly') || MOBILE || flight.free || (e.pointerType && e.pointerType !== 'mouse')) return; if (flight.locked) pick(cam.fwd[0], cam.fwd[1], cam.fwd[2]); else canvas.requestPointerLock?.()?.catch?.(() => {}); };
   // viewpoints and save points (kept in this browser only)
   POSES.forEach((p, i) => { const b = document.createElement('button'); b.textContent = p.name; b.onclick = () => { cancelGoto(); halt(); freshNight(); setPose(i); state.snap = 1; launch(); flash(p.name); }; $('vp').append(b); });
   let saves = []; try { saves = JSON.parse(localStorage.starhopperSaves || '[]'); } catch {}
@@ -576,6 +588,9 @@ async function main() {
         let ux = vx, uy = vy; const n = Math.hypot(ux, uy) || 1; ux /= n; uy /= n;
         const hw = iw / 2 - 96, hh = ih / 2 - 44, k = Math.min(hw / Math.max(Math.abs(ux), 1e-6), hh / Math.max(Math.abs(uy), 1e-6));
         px = iw / 2 + ux * k; py = ih / 2 - uy * k; rot = Math.atan2(-uy, ux);
+        // if the page has been magnified, keep the arrow inside the part of it that is on screen
+        const vv = window.visualViewport;
+        if (vv && vv.scale > 1.01) { px = Math.max(vv.offsetLeft + 24, Math.min(vv.offsetLeft + vv.width - 24, px)); py = Math.max(vv.offsetTop + 24, Math.min(vv.offsetTop + vv.height - 24, py)); }
       }
       // no ring once the target is a disc bigger than the ring
       const big = inView && target.row[8] / Math.hypot(tx, ty, tz) * f * ih / 2 > 15;
