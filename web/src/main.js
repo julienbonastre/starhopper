@@ -588,6 +588,9 @@ async function main() {
         let ux = vx, uy = vy; const n = Math.hypot(ux, uy) || 1; ux /= n; uy /= n;
         const hw = iw / 2 - 96, hh = ih / 2 - 44, k = Math.min(hw / Math.max(Math.abs(ux), 1e-6), hh / Math.max(Math.abs(uy), 1e-6));
         px = iw / 2 + ux * k; py = ih / 2 - uy * k; rot = Math.atan2(-uy, ux);
+        // if the page has been magnified, keep the arrow inside the part of it that is on screen
+        const vv = window.visualViewport;
+        if (vv && vv.scale > 1.01) { px = Math.max(vv.offsetLeft + 24, Math.min(vv.offsetLeft + vv.width - 24, px)); py = Math.max(vv.offsetTop + 24, Math.min(vv.offsetTop + vv.height - 24, py)); }
       }
       // no ring once the target is a disc bigger than the ring
       const big = inView && target.row[8] / Math.hypot(tx, ty, tz) * f * ih / 2 > 15;

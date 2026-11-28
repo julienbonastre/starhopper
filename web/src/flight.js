@@ -120,12 +120,18 @@ export function initInput(canvas, onAction) {
   let raw = 0;
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
+    if (e.ctrlKey) return;                                              // a trackpad pinch, not a scroll (see below)
     const dy = e.deltaMode ? e.deltaY * 33 : e.deltaY;
     if (Math.abs(raw - flight.thr) > 0.09) raw = flight.thr;           // something else moved it (Space, the menu)
     raw = Math.max(-1, Math.min(1, raw - Math.max(-120, Math.min(120, dy)) / 2500));
     flight.thr = Math.abs(raw) < 0.08 ? 0 : raw; flight.wheel = true;
   }, { passive: false });
   addEventListener('keydown', (e) => { if (e.code === 'Space' && e.target.tagName !== 'INPUT' && flight.wheel) { flight.thr = 0; raw = 0; } });
+  // A pinch on a trackpad would magnify the whole page, pushing the panels and the target's arrow off the edges of
+  // the window with no obvious way back. Chrome and Firefox report it as a wheel event with Ctrl held; Safari as
+  // gesture events. Neither is allowed to zoom the page.
+  addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+  for (const ev of ['gesturestart', 'gesturechange']) addEventListener(ev, (e) => e.preventDefault(), { passive: false });
 }
 
 // start an eased flight to a point, stopping `stop` parsecs short of it
