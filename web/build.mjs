@@ -17,7 +17,12 @@ const dev = process.argv.includes('--dev');
 // the build's name: the commit it was made from and that commit's date (shown on the title screen, and written to
 // version.json so that a page already open can tell when a newer one has been deployed)
 const git = (a) => { try { return execSync('git ' + a, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, TZ: 'UTC' } }).toString().trim(); } catch { return ''; } };
-const version = [git('rev-parse --short=7 HEAD') || 'local', git('log -1 --format=%cd --date=format-local:%Y-%m-%d\\ %H:%M\\ UTC') ].filter(Boolean).join(' \u00b7 ') + (git('status --porcelain -- web pipeline') ? ' +' : '');
+// A deployed build of main also carries its release (RELEASE=v1.2.3, set by the workflow) and links to that
+// release's page; a preview links to its pull request. Elsewhere there is no link.
+const release = /^v\d+\.\d+\.\d+$/.test(process.env.RELEASE || '') && !preview ? process.env.RELEASE : '';
+const repoUrl = (process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY ? process.env.GITHUB_SERVER_URL + '/' + process.env.GITHUB_REPOSITORY : git('remote get-url origin')).replace(/^git@([^:]+):/, 'https://$1/').replace(/\.git$/, '');
+const versionUrl = !/^https:\/\//.test(repoUrl) ? '' : release ? repoUrl + '/releases/tag/' + release : preview ? repoUrl + '/pull/' + preview : '';
+const version = [release, git('rev-parse --short=7 HEAD') || 'local', git('log -1 --format=%cd --date=format-local:%Y-%m-%d\\ %H:%M\\ UTC') ].filter(Boolean).join(' \u00b7 ') + (git('status --porcelain -- web pipeline') ? ' +' : '');
 // shrink the WGSL inside /*wgsl*/`...` literals before the JS is minified
 const minWgsl = (s) => s.replace(/\/\/[^\n]*/g, '').replace(/\s+/g, ' ').replace(/ ?([{}()\[\];,:=+\-*\/<>&|!%@]) ?/g, '$1').trim();
 const wgsl = {
@@ -31,14 +36,14 @@ const wgsl = {
 };
 const out = await build({
   entryPoints: [path.join(here, 'src', 'main.js')], bundle: true, write: false, format: 'iife', target: 'es2022',
-  minify: !dev, legalComments: 'none', define: { DEV: String(dev), DATA_BASE: JSON.stringify(dataBase), PREVIEW: JSON.stringify(preview), VERSION: JSON.stringify(version) }, plugins: [wgsl],
+  minify: !dev, legalComments: 'none', define: { DEV: String(dev), DATA_BASE: JSON.stringify(dataBase), PREVIEW: JSON.stringify(preview), VERSION: JSON.stringify(version), VERSION_URL: JSON.stringify(versionUrl) }, plugins: [wgsl],
 });
 let html = readFileSync(path.join(here, 'template.html'), 'utf8');
 if (!dev) html = html.replace(/<style>([^]*?)(?=<\/style>)/, '<style>' + (await transform(html.match(/<style>([^]*?)<\/style>/)[1], { loader: 'css', minify: true })).code.trim()).replace(/>\s+</g, '><');
 html = html.replace('/*SCRIPT*/', () => out.outputFiles[0].text.trim());
 mkdirSync(dist, { recursive: true });
 writeFileSync(path.join(dist, 'index.html'), html);
-writeFileSync(path.join(dist, 'version.json'), JSON.stringify({ version }));
+writeFileSync(path.join(dist, 'version.json'), JSON.stringify({ version, release, url: versionUrl }));
 const data = path.join(root, 'data');
 if (dataBase !== 'data/') console.log(`data is loaded from ${dataBase}`);
 else if (existsSync(data)) cpSync(data, path.join(dist, 'data'), { recursive: true });
