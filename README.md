@@ -112,4 +112,8 @@ Inspired by [Abyssal Garden](https://github.com/Noniv/abyssal-garden).
 
 ## License
 
+## Releases
+
+Every merge to `main` is deployed and published as a [release](https://github.com/julienbonastre/starhopper/releases) numbered `major.minor.patch`. The number steps on by the merged pull request's labels: `major` for a change that breaks saved places or links, `enhancement` for a new feature, anything else a fix. The build line at the foot of the title screen names the release and links to its notes; a preview's links to its pull request.
+
 Code is [MIT](LICENSE). Baked catalogue data carries the licences of its sources (AT-HYG, Stellarium and OpenNGC are CC BY-SA 4.0; the Moon and planet maps are CC BY 4.0), listed in the app's credits.

@@ -79,10 +79,40 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+      new: ${{ steps.version.outputs.new }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # Every commit that reaches main is a release, numbered major.minor.patch. A rebuild of a commit that already
+      # has its tag (the runs that pull requests ask for, to refresh their previews) keeps that number. Otherwise
+      # the number steps on from the latest tag by the labels of the pull request that was merged: "major" for a
+      # change that breaks saved places or links, "enhancement" for a new feature, anything else a fix.
+      - name: Version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(git tag --points-at HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)
+          new=0
+          if [ -z "$tag" ]; then
+            new=1
+            last=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)
+            if [ -z "$last" ]; then tag=v0.1.0; else
+              labels=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" --jq '[.[0].labels[]?.name] | join(",")' 2>/dev/null || true)
+              IFS=. read -r ma mi pa <<< "${last#v}"
+              case ",$labels," in
+                *,major,*) ma=$((ma + 1)); mi=0; pa=0 ;;
+                *,enhancement,*) mi=$((mi + 1)); pa=0 ;;
+                *) pa=$((pa + 1)) ;;
+              esac
+              tag="v$ma.$mi.$pa"
+            fi
+          fi
+          echo "release=$tag" >> "$GITHUB_OUTPUT"; echo "new=$new" >> "$GITHUB_OUTPUT"
+          echo "::notice::this build is $tag$([ "$new" = 1 ] && echo ' (new)')"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -98,6 +128,8 @@ jobs:
       - run: npm run data
       - run: npm test
       - run: npm run build
+        env:
+          RELEASE: ${{ steps.version.outputs.release }}
       - name: Previews of open pull requests
         env:
           GH_TOKEN: ${{ github.token }}
@@ -140,3 +172,16 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # ---- once the site is live: tag the commit and publish the release its build info links to
+  release:
+    needs: [build, deploy]
+    if: needs.build.outputs.new == '1'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.build.outputs.release }}
+    steps:
+      - run: gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
